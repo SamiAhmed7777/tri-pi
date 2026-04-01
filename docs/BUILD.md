@@ -118,21 +118,10 @@ These are cosmetic and don't affect functionality.
 # Strip debug symbols (reduces size to ~40MB)
 strip trianglesd
 
-# Compress with UPX (RECOMMENDED - reduces to ~1.6MB!)
-sudo apt-get install -y upx-ucl
-upx --best --lzma trianglesd
-# Before: ~40MB → After: ~1.6MB (80% reduction)
-
 # Install to system
 sudo cp trianglesd /usr/local/bin/
 sudo chmod +x /usr/local/bin/trianglesd
 ```
-
-**UPX Compression Benefits:**
-- 80% smaller binary (40MB → 1.6MB)
-- Faster download/transfer
-- No performance penalty (decompresses to RAM on load)
-- Fully reversible: `upx -d trianglesd`
 
 **Verify installation:**
 ```bash

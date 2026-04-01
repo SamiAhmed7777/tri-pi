@@ -46,7 +46,7 @@ jobs:
               DEBIAN_FRONTEND=noninteractive apt-get install -y \
                 git build-essential libtool autotools-dev automake pkg-config \
                 libssl-dev libevent-dev bsdmainutils libboost-all-dev \
-                libminiupnpc-dev libzmq3-dev tor curl wget upx-ucl
+                libminiupnpc-dev libzmq3-dev tor curl wget
               
               # Build BerkeleyDB 4.8
               cd /tmp
@@ -75,13 +75,6 @@ jobs:
               cd src
               make -f makefile.unix -j\$(nproc) USE_UPNP=1
               strip trianglesd
-              
-              # Compress with UPX (80% size reduction!)
-              echo '=== Before UPX ==='
-              ls -lh trianglesd
-              upx --best --lzma trianglesd
-              echo '=== After UPX ==='
-              ls -lh trianglesd
               
               # Copy to workspace
               mkdir -p /workspace/bin
