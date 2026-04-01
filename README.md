@@ -8,7 +8,20 @@ Complete Triangles (TRI) cryptocurrency node package for Raspberry Pi 4/5 (64-bi
 
 ## Quick Start
 
-### Download Latest Release
+### 🚀 Bootstrap Installer (Recommended - Only 1.6MB!)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/SamiAhmed7777/tri-pi/main/bootstrap.sh | sudo bash
+```
+
+**Ultra-fast setup:**
+- Downloads compressed binary (1.6MB vs 5.1MB)
+- Auto-installs all dependencies
+- Generates secure config
+- Enables Tor integration
+- Ready to mine in 60 seconds!
+
+### 📦 Full Package Download
 
 ```bash
 # Get latest version
@@ -23,7 +36,7 @@ sudo ./install.sh
 trianglesd
 ```
 
-### Or Clone and Build from Source
+### 🔧 Build from Source
 
 ```bash
 git clone https://github.com/SamiAhmed7777/tri-pi.git
