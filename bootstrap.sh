@@ -6,7 +6,7 @@ set -e
 
 VERSION="v5.4.4"
 BINARY_URL="https://github.com/SamiAhmed7777/tri-pi/raw/main/releases/trianglesd-upx"
-BLOCKCHAIN_URL="https://example.com/tri-blockchain-latest.tar.gz"  # TODO: Update with actual URL
+BLOCKCHAIN_URL="http://194.233.88.206:8085/triangles-bootstrap.tar.gz"
 
 echo "╔═══════════════════════════════════════╗"
 echo "║   TRI-PI $VERSION Bootstrap Installer  ║"
