@@ -1,7 +1,7 @@
 name: Build TRI-PI ARM64
 
 on:
-  # Trigger on new tags in triangles_v5 repo (manual dispatch for now)
+  # Manual trigger
   workflow_dispatch:
     inputs:
       version:
@@ -9,38 +9,12 @@ on:
         required: true
         default: 'v5.4.4'
   
-  # Auto-trigger on schedule to check for new releases
-  schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+  # Triggered by upstream watcher
+  repository_dispatch:
+    types: [new-release]
 
 jobs:
-  check-version:
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      latest_version: ${{ steps.check.outputs.latest_version }}
-    steps:
-      - name: Check for new triangles_v5 release
-        id: check
-        run: |
-          # Get latest release from triangles_v5
-          LATEST=$(curl -s https://api.github.com/repos/SamiAhmed7777/triangles_v5/releases/latest | jq -r .tag_name)
-          echo "latest_version=$LATEST" >> $GITHUB_OUTPUT
-          
-          # Get current version from our repo
-          CURRENT=$(cat VERSION 2>/dev/null || echo "v0.0.0")
-          
-          if [ "$LATEST" != "$CURRENT" ]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "New version detected: $LATEST (current: $CURRENT)"
-          else
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Already up to date: $CURRENT"
-          fi
-
   build-arm64:
-    needs: check-version
-    if: needs.check-version.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     
     steps:
@@ -57,7 +31,7 @@ jobs:
       
       - name: Build TRI-PI in ARM64 container
         run: |
-          VERSION="${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}"
+          VERSION="${{ github.event.inputs.version || github.event.client_payload.version }}"
           echo "Building TRI-PI $VERSION for ARM64..."
           
           docker run --rm --platform linux/arm64 \
@@ -113,7 +87,7 @@ jobs:
       
       - name: Create release package
         run: |
-          VERSION="${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}"
+          VERSION="${{ github.event.inputs.version || github.event.client_payload.version }}"
           PACKAGE_DIR="tri-pi-${VERSION}-arm64"
           
           # Package structure already exists, just update binary
@@ -136,13 +110,13 @@ jobs:
       
       - name: Update README with new version
         run: |
-          VERSION="${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}"
+          VERSION="${{ github.event.inputs.version || github.event.client_payload.version }}"
           sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/${VERSION}/g" README.md
           sed -i "s/version [0-9]\+\.[0-9]\+\.[0-9]\+/version ${VERSION}/g" docs/BUILD.md
       
       - name: Commit and push changes
         run: |
-          VERSION="${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}"
+          VERSION="${{ github.event.inputs.version || github.event.client_payload.version }}"
           
           git config user.name "TRI-PI Builder"
           git config user.email "bot@tri-pi.build"
@@ -162,19 +136,19 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}
-          name: TRI-PI ${{ github.event.inputs.version || needs.check-version.outputs.latest_version }} ARM64
+          tag_name: ${{ github.event.inputs.version || github.event.client_payload.version }}
+          name: TRI-PI ${{ github.event.inputs.version || github.event.client_payload.version }} ARM64
           body: |
-            # TRI-PI ${{ github.event.inputs.version || needs.check-version.outputs.latest_version }} ARM64
+            # TRI-PI ${{ github.event.inputs.version || github.event.client_payload.version }} ARM64
             
-            Automatically built from [triangles_v5 ${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}](https://github.com/SamiAhmed7777/triangles_v5/releases/tag/${{ github.event.inputs.version || needs.check-version.outputs.latest_version }})
+            Automatically built from [triangles_v5 ${{ github.event.inputs.version || github.event.client_payload.version }}](https://github.com/SamiAhmed7777/triangles_v5/releases/tag/${{ github.event.inputs.version || github.event.client_payload.version }})
             
             ## Installation
             
             ```bash
-            wget https://github.com/SamiAhmed7777/tri-pi/releases/download/${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}/tri-pi-${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}-arm64.tar.gz
-            tar xzf tri-pi-${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}-arm64.tar.gz
-            cd tri-pi-${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}-arm64
+            wget https://github.com/SamiAhmed7777/tri-pi/releases/download/${{ github.event.inputs.version || github.event.client_payload.version }}/tri-pi-${{ github.event.inputs.version || github.event.client_payload.version }}-arm64.tar.gz
+            tar xzf tri-pi-${{ github.event.inputs.version || github.event.client_payload.version }}-arm64.tar.gz
+            cd tri-pi-${{ github.event.inputs.version || github.event.client_payload.version }}-arm64
             sudo ./install.sh
             ```
             
@@ -188,8 +162,8 @@ jobs:
             
             Built for: Raspberry Pi 4/5 (64-bit), ARM64 servers
           files: |
-            releases/tri-pi-${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}-arm64.tar.gz
-            releases/tri-pi-${{ github.event.inputs.version || needs.check-version.outputs.latest_version }}-arm64.tar.gz.sha256
+            releases/tri-pi-${{ github.event.inputs.version || github.event.client_payload.version }}-arm64.tar.gz
+            releases/tri-pi-${{ github.event.inputs.version || github.event.client_payload.version }}-arm64.tar.gz.sha256
           draft: false
           prerelease: false
         env:
