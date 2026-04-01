@@ -33,11 +33,13 @@ sudo ./install.sh
 
 ## What's Included
 
-- **trianglesd** v5.4.4 - Native ARM64 binary (85MB)
+- **trianglesd** v5.4.4 - Native ARM64 binary (1.6MB, UPX compressed)
 - **Tor integration** - Built-in hidden service support
 - **Updated seed nodes** - Latest v5.4.4 onion addresses
 - **Auto-installer** - One-command setup
 - **Full documentation** - Build instructions and usage guide
+
+**Note:** Binary is compressed with UPX (Ultimate Packer for Executables) for 80% size reduction. Decompresses automatically on execution with no performance penalty.
 
 ## System Requirements
 
