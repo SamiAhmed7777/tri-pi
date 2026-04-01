@@ -14,60 +14,21 @@ Fast-sync your Raspberry Pi node with pre-synced blockchain data.
 - Start from latest block height
 - Ready to mine in minutes
 - Minimal resource usage
-- Only ~500MB download
+- Download current blockchain snapshot
 
-### Creating a Blockchain Snapshot
+### Installation
 
-Run on a fully-synced node (DNS2, DNS3, etc.):
-
-```bash
-# Download snapshot creator
-curl -L -o create-snapshot.sh \
-  https://raw.githubusercontent.com/SamiAhmed7777/tri-pi/main/scripts/create-blockchain-snapshot.sh
-
-chmod +x create-snapshot.sh
-
-# Create snapshot (stops daemon temporarily)
-./create-snapshot.sh
-```
-
-**Output:**
-- `tri-blockchain-v5.4.4-YYYY-MM-DD.tar.gz` - Compressed blockchain
-- `snapshot-info.txt` - Metadata (block height, checksums)
-
-### Hosting the Snapshot
-
-**Option 1: GitHub Release** (recommended for public distribution)
-```bash
-gh release upload v5.4.4 tri-blockchain-*.tar.gz
-```
-
-**Option 2: Dropbox**
-```bash
-dbxcli put tri-blockchain-*.tar.gz /Krystie/TRI/
-dbxcli share /Krystie/TRI/tri-blockchain-*.tar.gz
-```
-
-**Option 3: Custom Web Server**
-```bash
-scp tri-blockchain-*.tar.gz user@server:/var/www/html/tri/
-# Access at: https://example.com/tri/tri-blockchain-v5.4.4-2026-04-01.tar.gz
-```
-
-### Updating Bootstrap Script
-
-After uploading, update `bootstrap.sh`:
+The TRI-PI installer offers automatic blockchain bootstrap during setup:
 
 ```bash
-# Edit line 9
-BLOCKCHAIN_URL="https://your-url-here/tri-blockchain-latest.tar.gz"
+curl -sSL https://raw.githubusercontent.com/SamiAhmed7777/tri-pi/main/bootstrap.sh | bash
 ```
 
-Commit and push to make it available to all Pi users!
+When prompted, choose **option 1** to download the pre-synced blockchain.
 
-### Snapshot Contents
+### What Gets Downloaded
 
-**Included:**
+The bootstrap package includes:
 - `blk*.dat` - Blockchain data files
 - `database/` - Block index
 - `txleveldb/` - Transaction index
@@ -75,47 +36,58 @@ Commit and push to make it available to all Pi users!
 - `peers.dat` - Known peer cache
 - `smsg.ini` - Messaging config
 
-**Excluded (for security/privacy):**
-- `wallet.dat` - NEVER include! Contains private keys
-- `debug.log` - Large, regenerated on run
-- `onion/` - Regenerated automatically
-- `tor_data/` - Regenerated automatically
+**Not included (for security):**
+- `wallet.dat` - Your wallet is created fresh on first run
+- `debug.log` - Generated during operation
+- `onion/` - Hidden service keys generated automatically
+- `tor_data/` - Tor state regenerated on startup
 
-### Maintenance Schedule
+### After Installation
 
-**Recommended:** Create new snapshots weekly/monthly as blockchain grows.
-
-Automation example (cron):
+Start your node:
 ```bash
-# Every Sunday at 2 AM
-0 2 * * 0 /usr/local/bin/create-snapshot.sh && \
-          gh release upload v5.4.4 /tmp/tmp.*/tri-blockchain-*.tar.gz --clobber
+trianglesd
 ```
 
-### Compression Stats
+Check synchronization status:
+```bash
+trianglesd getinfo
+```
 
-Typical compression with tar.gz:
-- Original blockchain: ~2-5GB (depends on block height)
-- Compressed: ~500MB-1.5GB
-- Compression ratio: ~70-75%
+The blockchain will continue syncing from the bootstrap snapshot's block height to the current network tip.
+
+### First Run
+
+On first startup, trianglesd will:
+1. Load the bootstrap blockchain data
+2. Generate a fresh wallet.dat
+3. Create Tor hidden service keys
+4. Begin syncing remaining blocks
+5. Connect to the network via onion seeds
+
+**Tip:** Watch sync progress with:
+```bash
+watch -n5 'trianglesd getinfo | grep blocks'
+```
 
 ### Security Notes
 
-1. **Never include wallet.dat** - Contains private keys!
-2. **Verify checksums** - Always provide SHA256 hashes
-3. **Trust** - Only use snapshots from trusted sources
-4. **Update regularly** - Stale snapshots still require catching up
+1. **Fresh wallet** - Always generated locally, never downloaded
+2. **Verify source** - Only use bootstrap from trusted URLs
+3. **Network sync** - Remaining blocks verified via network consensus
+4. **Regular updates** - Bootstrap snapshot updated weekly
 
-### Testing
+### Troubleshooting
 
-Before releasing publicly:
+**If bootstrap download fails:**
+- Installer automatically falls back to full sync from genesis
+- You can manually download and extract:
+  ```bash
+  cd ~/.triangles
+  curl -O http://194.233.88.206:8085/triangles-bootstrap.tar.gz
+  tar xzf triangles-bootstrap.tar.gz
+  ```
 
-```bash
-# On a fresh Pi
-rm -rf ~/.triangles
-curl -sSL https://raw.githubusercontent.com/SamiAhmed7777/tri-pi/main/bootstrap.sh | bash
-# Choose option 1 (bootstrap download)
-
-# Verify it starts from correct block
-trianglesd getinfo | grep blocks
-```
+**Snapshot too old?**
+- No problem! Your node will sync the remaining blocks automatically
+- This is still much faster than syncing from block 0
