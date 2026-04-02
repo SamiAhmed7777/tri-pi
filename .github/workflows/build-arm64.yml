@@ -15,75 +15,89 @@ on:
 
 jobs:
   build-arm64:
-    runs-on: ubuntu-latest
+    # Use self-hosted Hetzner ARM64 runner for native builds (faster, more reliable)
+    # Falls back to GitHub-hosted ubuntu-24.04-arm64 if available
+    runs-on: [self-hosted, linux, arm64]
     
     steps:
       - name: Checkout tri-pi repo
         uses: actions/checkout@v4
       
-      - name: Set up QEMU for ARM64 emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+      - name: Install build dependencies
+        run: |
+          # Update system first
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            git build-essential libtool autotools-dev automake pkg-config \
+            libssl-dev libevent-dev bsdmainutils libboost-all-dev \
+            libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build BerkeleyDB 4.8
+        run: |
+          set -e
+          cd /tmp
+          
+          # Clean up any previous build
+          rm -rf db-4.8.30.NC 2>/dev/null || true
+          
+          if [ ! -f db-4.8.30.NC.tar.gz ]; then
+            echo "Downloading BerkeleyDB 4.8.30..."
+            curl -sL -o db-4.8.30.NC.tar.gz \
+              http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz
+          fi
+          
+          echo "Extracting and building BerkeleyDB..."
+          tar xzf db-4.8.30.NC.tar.gz
+          cd db-4.8.30.NC/build_unix
+          
+          # Update config scripts for ARM64 (if not already done)
+          if ! grep -q aarch64 ../dist/config.guess; then
+            echo "Updating config.guess/config.sub for ARM64..."
+            curl -sL -o ../dist/config.guess \
+              'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
+            curl -sL -o ../dist/config.sub \
+              'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
+            chmod +x ../dist/config.guess ../dist/config.sub
+          fi
+          
+          ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=/usr/local
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+          
+          echo "✅ BerkeleyDB 4.8.30 installed"
       
-      - name: Build TRI-PI in ARM64 container
+      - name: Build triangles_v5
         run: |
           VERSION="${{ github.event.inputs.version || github.event.client_payload.version }}"
-          echo "Building TRI-PI $VERSION for ARM64..."
+          echo "Building triangles $VERSION for ARM64..."
           
-          docker run --rm --platform linux/arm64 \
-            -v $PWD:/workspace \
-            -w /workspace \
-            ubuntu:24.04 \
-            bash -c "
-              set -e
-              
-              # Install dependencies
-              apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                git build-essential libtool autotools-dev automake pkg-config \
-                libssl-dev libevent-dev bsdmainutils libboost-all-dev \
-                libminiupnpc-dev libzmq3-dev tor curl wget
-              
-              # Build BerkeleyDB 4.8
-              cd /tmp
-              wget -q http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz
-              tar xzf db-4.8.30.NC.tar.gz
-              cd db-4.8.30.NC/build_unix
-              
-              # Update config scripts for ARM64
-              wget -q -O ../dist/config.guess \
-                'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
-              wget -q -O ../dist/config.sub \
-                'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
-              chmod +x ../dist/config.guess ../dist/config.sub
-              
-              ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=/usr/local
-              make -j\$(nproc)
-              make install
-              ldconfig
-              
-              # Clone and build triangles_v5
-              cd /tmp
-              git clone https://github.com/SamiAhmed7777/triangles_v5.git
-              cd triangles_v5
-              git checkout $VERSION
-              
-              cd src
-              make -f makefile.unix -j\$(nproc) USE_UPNP=1
-              strip trianglesd
-              
-              # Copy to workspace
-              mkdir -p /workspace/bin
-              cp trianglesd /workspace/bin/
-              chmod +x /workspace/bin/trianglesd
-              
-              echo 'Build complete!'
-              /workspace/bin/trianglesd --version
-            "
+          set -e
+          cd /tmp
+          
+          # Clone fresh or update
+          if [ -d triangles_v5 ]; then
+            cd triangles_v5
+            git fetch --all
+            git checkout $VERSION
+          else
+            git clone -b $VERSION https://github.com/SamiAhmed7777/triangles_v5.git
+            cd triangles_v5
+          fi
+          
+          cd src
+          make -f makefile.unix clean 2>/dev/null || true
+          make -f makefile.unix -j$(nproc) USE_UPNP=1
+          strip trianglesd
+          
+          echo "✅ Build complete!"
+          file trianglesd
+          ./trianglesd --version
+          
+          # Copy to workspace
+          mkdir -p $GITHUB_WORKSPACE/bin
+          cp trianglesd $GITHUB_WORKSPACE/bin/
+          chmod +x $GITHUB_WORKSPACE/bin/trianglesd
       
       - name: Create release package
         run: |
