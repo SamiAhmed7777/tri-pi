@@ -1,57 +1,94 @@
 name: Build TRI-PI ARM64
 
 on:
+  # Triggered when triangles_v5 has a new release
   repository_dispatch:
     types: [new-release]
+  
+  # Manual trigger (always builds latest)
   workflow_dispatch:
 
 jobs:
   build-arm64:
+    # Use GitHub Actions QEMU for ARM64 emulation
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout tri-pi repo
         uses: actions/checkout@v4
       
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
       - name: Get latest triangles version
         id: get-version
         run: |
+          # Always fetch latest from triangles_v5 repo
           VERSION=$(curl -s https://api.github.com/repos/SamiAhmed7777/triangles_v5/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "🔍 Building triangles $VERSION for ARM64"
       
-      - name: Build ARM64 binary with Docker
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build triangles_v5 ARM64
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
+          echo "Building triangles $VERSION for ARM64..."
           
-          docker buildx build \
-            --platform linux/arm64 \
-            --build-arg TRIANGLES_VERSION=$VERSION \
-            -f .github/docker/Dockerfile.arm64 \
-            -o type=docker \
-            -t tri-pi:$VERSION \
-            .
+          docker run --rm --platform linux/arm64 \
+            -v $PWD:/workspace \
+            -w /workspace \
+            ubuntu:24.04 bash << 'DOCKER_EOF'
+          set -e
           
-          # Extract binary from image
-          docker run --rm \
-            --platform linux/arm64 \
-            -v $(pwd)/bin:/output \
-            tri-pi:$VERSION \
-            cp /usr/local/bin/trianglesd /output/
+          # Install dependencies
+          apt-get update -qq
+          apt-get install -y -qq \
+            git build-essential libtool autotools-dev automake pkg-config \
+            libssl-dev libevent-dev bsdmainutils libboost-all-dev \
+            libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates
+          
+          # Build BerkeleyDB 4.8
+          cd /tmp
+          curl -sL -o db-4.8.30.NC.tar.gz http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz
+          tar xzf db-4.8.30.NC.tar.gz
+          cd db-4.8.30.NC/build_unix
+          
+          # Update config scripts for ARM64
+          curl -sL -o ../dist/config.guess 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
+          curl -sL -o ../dist/config.sub 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
+          chmod +x ../dist/config.guess ../dist/config.sub
+          
+          ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=/usr/local
+          make -j$(nproc)
+          make install
+          ldconfig
+          
+          # Clone and build triangles
+          cd /tmp
+          git clone -b $VERSION https://github.com/SamiAhmed7777/triangles_v5.git
+          cd triangles_v5/src
+          
+          make -f makefile.unix clean 2>/dev/null || true
+          make -f makefile.unix -j$(nproc) USE_UPNP=1
+          strip trianglesd
+          
+          # Copy to workspace
+          cp trianglesd /workspace/bin/
+          chmod +x /workspace/bin/trianglesd
+          
+          echo "✅ Build complete!"
+          file /workspace/bin/trianglesd
+          /workspace/bin/trianglesd --version
+          DOCKER_EOF
       
       - name: Create release package
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
           PACKAGE_DIR="tri-pi-${VERSION}-arm64"
-          
-          chmod +x bin/trianglesd
-          echo "$VERSION" > VERSION
           
           mkdir -p releases
           tar czf "releases/${PACKAGE_DIR}.tar.gz" \
@@ -73,9 +110,11 @@ jobs:
           git add bin/trianglesd VERSION releases/
           git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release
 
-- Built from triangles_v5 ${VERSION}
-- ARM64 binary via GitHub Actions QEMU
-- Release package and checksums generated" || echo "No changes to commit"
+- Native ARM64 binary built from triangles_v5 ${VERSION}
+- Compiled via GitHub Actions QEMU
+- Release package and checksums generated
+
+Built by GitHub Actions" || echo "No changes to commit"
           
           git push origin main || echo "Already up to date"
       
@@ -87,7 +126,7 @@ jobs:
           body: |
             # TRI-PI ${{ steps.get-version.outputs.version }} ARM64
             
-            ARM64 release built from [triangles_v5 ${{ steps.get-version.outputs.version }}](https://github.com/SamiAhmed7777/triangles_v5/releases/tag/${{ steps.get-version.outputs.version }})
+            Native ARM64 release built from [triangles_v5 ${{ steps.get-version.outputs.version }}](https://github.com/SamiAhmed7777/triangles_v5/releases/tag/${{ steps.get-version.outputs.version }})
             
             ## Installation
             
@@ -97,6 +136,14 @@ jobs:
             cd tri-pi-*/
             sudo ./install.sh
             ```
+            
+            ## What's Included
+            
+            - Native ARM64 trianglesd binary
+            - One-command installer
+            - Complete build documentation
+            - Tor integration
+            - Updated seed nodes
             
             Built for: Raspberry Pi 4/5 (64-bit), ARM64 servers
           files: |
