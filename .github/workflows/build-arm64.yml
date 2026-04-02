@@ -108,13 +108,7 @@ jobs:
           git config user.email "bot@tri-pi.build"
           
           git add bin/trianglesd VERSION releases/
-          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release
-
-- Native ARM64 binary built from triangles_v5 ${VERSION}
-- Compiled via GitHub Actions QEMU
-- Release package and checksums generated
-
-Built by GitHub Actions" || echo "No changes to commit"
+          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release - Native ARM64 binary, GitHub Actions QEMU" || echo "No changes to commit"
           
           git push origin main || echo "Already up to date"
       
