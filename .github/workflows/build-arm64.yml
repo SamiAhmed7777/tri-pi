@@ -8,6 +8,9 @@ on:
   # Manual trigger (always builds latest)
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-arm64:
     # Use GitHub Actions QEMU for ARM64 emulation
