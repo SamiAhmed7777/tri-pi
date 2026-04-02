@@ -1,17 +1,22 @@
 #!/bin/bash
 # TRI-PI Bootstrap Installer
-# Ultra-lightweight initial download with optional blockchain bootstrap
+# One-liner: curl -sSL https://raw.githubusercontent.com/SamiAhmed7777/tri-pi/main/bootstrap.sh | sudo bash
+#
+# Downloads the latest release, installs dependencies, creates systemd service,
+# and optionally bootstraps the blockchain. ~60 second setup.
 
 set -e
 
-VERSION="v5.4.4"
-BINARY_URL="https://github.com/SamiAhmed7777/tri-pi/raw/main/releases/trianglesd-upx"
-BLOCKCHAIN_URL="http://194.233.88.206:8085/triangles-bootstrap.tar.gz"
-
 echo "╔═══════════════════════════════════════╗"
-echo "║   TRI-PI $VERSION Bootstrap Installer  ║"
+echo "║   TRI-PI Bootstrap Installer          ║"
 echo "╚═══════════════════════════════════════╝"
 echo ""
+
+# Must be root
+if [ "$(id -u)" != "0" ]; then
+    echo "❌ Error: Run as root (use sudo)"
+    exit 1
+fi
 
 # Check ARM64
 ARCH=$(uname -m)
@@ -21,135 +26,162 @@ if [[ "$ARCH" != "aarch64" ]]; then
     exit 1
 fi
 
-echo "✓ ARM64 architecture detected"
+echo "✓ ARM64 detected"
+
+# Get latest release version from GitHub
+echo "🔍 Checking latest release..."
+VERSION=$(curl -sL https://api.github.com/repos/SamiAhmed7777/tri-pi/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+if [ -z "$VERSION" ]; then
+    echo "⚠️  Could not detect latest version, using v5.5.0"
+    VERSION="v5.5.0"
+fi
+echo "   Latest: $VERSION"
 
 # Install dependencies
 echo ""
 echo "📦 Installing dependencies..."
-sudo apt-get update -qq
-sudo apt-get install -y tor curl bc > /dev/null 2>&1
-
+apt-get update -qq
+apt-get install -y -qq tor curl > /dev/null 2>&1
 echo "✓ Dependencies installed"
 
-# Download binary
+# Download release package
 echo ""
-echo "⬇️  Downloading trianglesd binary (1.6MB, UPX-compressed)..."
+PACKAGE_URL="https://github.com/SamiAhmed7777/tri-pi/releases/download/$VERSION/tri-pi-${VERSION}-arm64.tar.gz"
+echo "⬇️  Downloading TRI-PI $VERSION..."
 
 TMP_DIR=$(mktemp -d)
 cd "$TMP_DIR"
 
-if ! curl -L -o trianglesd "$BINARY_URL" 2>/dev/null; then
-    echo "❌ Download failed. Falling back to full package..."
-    PACKAGE_URL="https://github.com/SamiAhmed7777/tri-pi/releases/download/$VERSION/tri-pi-$VERSION-arm64.tar.gz"
-    curl -L -o tri-pi.tar.gz "$PACKAGE_URL"
-    tar xzf tri-pi.tar.gz
-    cd tri-pi-$VERSION-arm64
-    sudo cp bin/trianglesd /usr/local/bin/
-else
-    echo "✓ Binary downloaded"
-    chmod +x trianglesd
-    sudo cp trianglesd /usr/local/bin/
+if ! curl -sL -o tri-pi.tar.gz "$PACKAGE_URL"; then
+    echo "❌ Download failed: $PACKAGE_URL"
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
 
-# Verify installation
-echo ""
-echo "✅ Binary installed!"
-trianglesd --version
+DL_SIZE=$(du -sh tri-pi.tar.gz | cut -f1)
+echo "✓ Downloaded ($DL_SIZE)"
 
-# Create config directory
-mkdir -p ~/.triangles
+# Extract and install
+echo ""
+echo "📦 Installing..."
+tar xzf tri-pi.tar.gz
 
-# Blockchain bootstrap option
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Blockchain Sync Options"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "Choose sync method:"
-echo "  [1] Download bootstrap blockchain (FAST - recommended for Pi)"
-echo "      ~500MB download, start at current block height"
-echo ""
-echo "  [2] Sync from scratch (SLOW - may take days on Pi)"
-echo "      Start from genesis block"
-echo ""
-read -p "Your choice [1/2]: " SYNC_CHOICE
+cp bin/trianglesd /usr/local/bin/
+chmod +x /usr/local/bin/trianglesd
+echo "✓ Binary installed"
 
-if [[ "$SYNC_CHOICE" == "1" ]]; then
-    echo ""
-    echo "⬇️  Downloading blockchain bootstrap..."
-    echo "   This will save hours/days of initial sync!"
-    echo ""
+# Data directory
+DATA_DIR="/root/.triangles"
+mkdir -p "$DATA_DIR"
+
+# Generate config
+if [ ! -f "$DATA_DIR/triangles.conf" ]; then
+    RPC_PASS=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
     
-    if curl -L -o blockchain.tar.gz "$BLOCKCHAIN_URL" 2>/dev/null; then
-        echo "✓ Blockchain downloaded"
-        echo "📦 Extracting to ~/.triangles/ ..."
-        
-        tar xzf blockchain.tar.gz -C ~/
-        
-        BLOCK_HEIGHT=$(grep -oP 'Block Height: \K[0-9]+' ~/snapshot-info.txt 2>/dev/null || echo "latest")
-        echo "✓ Blockchain extracted (starting from block $BLOCK_HEIGHT)"
-        rm -f blockchain.tar.gz ~/snapshot-info.txt
-    else
-        echo "⚠️  Bootstrap download failed, will sync from scratch"
-    fi
-else
-    echo "✓ Will sync from genesis block"
-fi
-
-# Generate random RPC password
-RPC_PASS=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-
-# Create config if needed
-if [[ ! -f ~/.triangles/triangles.conf ]]; then
-    echo ""
-    echo "📝 Creating configuration..."
-    cat > ~/.triangles/triangles.conf << CONFIG
+    cat > "$DATA_DIR/triangles.conf" << CONFIG
+# TRI-PI $VERSION Configuration
 server=1
-daemon=1
 listen=1
-txindex=1
 
-# RPC settings
-rpcuser=trianglesrpc
+# RPC
+rpcuser=tripi
 rpcpassword=$RPC_PASS
 rpcallowip=127.0.0.1
-rpcport=8332
+rpcport=19199
 
 # Network
-port=8333
+port=24112
 maxconnections=50
 
-# Performance tuning for Raspberry Pi
+# Performance tuning for ARM/Pi
 dbcache=100
 maxmempool=50
+
+# Seed nodes
+addnode=194.233.88.206
+addnode=74.208.167.19
+addnode=179.189.35.51
 CONFIG
+    chmod 600 "$DATA_DIR/triangles.conf"
     echo "✓ Configuration created"
+else
+    echo "✓ Existing config preserved"
 fi
 
-# Enable Tor service
-sudo systemctl enable tor > /dev/null 2>&1
-sudo systemctl start tor > /dev/null 2>&1
-echo "✓ Tor service enabled"
+# Systemd service
+cat > /etc/systemd/system/triangles.service << SERVICE
+[Unit]
+Description=Triangles Cryptocurrency Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/trianglesd -daemon=0 -datadir=$DATA_DIR
+ExecStop=/usr/local/bin/trianglesd -datadir=$DATA_DIR stop
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=120
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable triangles > /dev/null 2>&1
+echo "✓ Systemd service installed"
+
+# Blockchain bootstrap
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Blockchain Sync"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  [1] Download bootstrap (~1.3GB) — FAST, recommended"
+echo "  [2] Sync from peers — slow (days/weeks on Pi)"
+echo ""
+read -p "  Choice [1/2]: " SYNC_CHOICE
+
+if [[ "$SYNC_CHOICE" == "1" ]]; then
+    BOOTSTRAP_URL="http://194.233.88.206:8085/triangles-bootstrap.tar.gz"
+    echo ""
+    echo "⬇️  Downloading blockchain bootstrap..."
+    
+    if curl -L --connect-timeout 30 --max-time 600 -o /tmp/triangles-bootstrap.tar.gz "$BOOTSTRAP_URL" 2>/dev/null; then
+        echo "✓ Downloaded"
+        echo "📦 Extracting..."
+        tar xzf /tmp/triangles-bootstrap.tar.gz -C "$DATA_DIR/"
+        rm -f /tmp/triangles-bootstrap.tar.gz
+        echo "✓ Blockchain deployed"
+    else
+        echo "⚠️  Bootstrap unreachable — will sync from peers"
+    fi
+fi
 
 # Cleanup
-cd ~
+cd /
 rm -rf "$TMP_DIR"
+
+# Start the node
+echo ""
+echo "🚀 Starting Triangles node..."
+systemctl start triangles
+sleep 3
+
+if systemctl is-active --quiet triangles; then
+    echo "✓ Node is running!"
+else
+    echo "⚠️  Node may still be starting — check: journalctl -u triangles -f"
+fi
 
 echo ""
 echo "╔═══════════════════════════════════════╗"
-echo "║          Installation Complete!       ║"
+echo "║       ✅ Installation Complete!       ║"
 echo "╚═══════════════════════════════════════╝"
 echo ""
-echo "🚀 Start your node:"
-echo "   trianglesd"
+echo "📊 Check status:  trianglesd -datadir=$DATA_DIR getinfo"
+echo "📋 View logs:     journalctl -u triangles -f"
+echo "🧅 Onion address: cat $DATA_DIR/onion/hostname"
+echo "🔄 Auto-starts on boot"
 echo ""
-echo "📊 Check status:"
-echo "   trianglesd getinfo"
-echo ""
-echo "🔍 View your onion address (after first run):"
-echo "   cat ~/.triangles/onion/private_key"
-echo ""
-echo "💡 Tip: First sync may take a while. Check progress with:"
-echo "   watch -n5 'trianglesd getinfo | grep blocks'"
-echo ""
-echo "Happy mining! 🎯"
