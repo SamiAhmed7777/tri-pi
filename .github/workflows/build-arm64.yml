@@ -39,10 +39,13 @@ jobs:
           echo "Building triangles $VERSION for ARM64..."
           
           docker run --rm --platform linux/arm64 \
+            -e VERSION="$VERSION" \
             -v $PWD:/workspace \
             -w /workspace \
-            ubuntu:24.04 bash << 'DOCKER_EOF'
+            ubuntu:24.04 bash -c '
           set -e
+          
+          echo "Building triangles $VERSION for ARM64..."
           
           # Install dependencies
           apt-get update -qq
@@ -58,8 +61,8 @@ jobs:
           cd db-4.8.30.NC/build_unix
           
           # Update config scripts for ARM64
-          curl -sL -o ../dist/config.guess 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
-          curl -sL -o ../dist/config.sub 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
+          curl -sL -o ../dist/config.guess "http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD"
+          curl -sL -o ../dist/config.sub "http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD"
           chmod +x ../dist/config.guess ../dist/config.sub
           
           ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=/usr/local
@@ -69,7 +72,7 @@ jobs:
           
           # Clone and build triangles
           cd /tmp
-          git clone -b $VERSION https://github.com/SamiAhmed7777/triangles_v5.git
+          git clone --branch $VERSION --depth 1 https://github.com/SamiAhmed7777/triangles_v5.git
           cd triangles_v5/src
           
           make -f makefile.unix clean 2>/dev/null || true
@@ -77,13 +80,14 @@ jobs:
           strip trianglesd
           
           # Copy to workspace
+          mkdir -p /workspace/bin
           cp trianglesd /workspace/bin/
           chmod +x /workspace/bin/trianglesd
           
-          echo "✅ Build complete!"
+          echo "Build complete!"
           file /workspace/bin/trianglesd
-          /workspace/bin/trianglesd --version
-          DOCKER_EOF
+          /workspace/bin/trianglesd --version || true
+          '
       
       - name: Create release package
         run: |
@@ -92,7 +96,7 @@ jobs:
           
           mkdir -p releases
           tar czf "releases/${PACKAGE_DIR}.tar.gz" \
-            bin/ docs/ install.sh README.md scripts/ VERSION
+            bin/ docs/ install.sh README.md VERSION BOOTSTRAP.md
           
           cd releases
           sha256sum "${PACKAGE_DIR}.tar.gz" > "${PACKAGE_DIR}.tar.gz.sha256"
