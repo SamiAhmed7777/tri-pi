@@ -1,0 +1,36 @@
+FROM ubuntu:24.04
+
+ARG TRIANGLES_VERSION=v5.5.0
+
+RUN apt-get update && apt-get install -y \
+    git build-essential libtool autotools-dev automake pkg-config \
+    libssl-dev libevent-dev bsdmainutils libboost-all-dev \
+    libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Build BerkeleyDB 4.8
+RUN cd /tmp && \
+    curl -sL -o db-4.8.30.NC.tar.gz http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz && \
+    tar xzf db-4.8.30.NC.tar.gz && \
+    cd db-4.8.30.NC/build_unix && \
+    curl -sL -o ../dist/config.guess 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD' && \
+    curl -sL -o ../dist/config.sub 'http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD' && \
+    chmod +x ../dist/config.guess ../dist/config.sub && \
+    ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=/usr/local && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/db-4.8.30.NC*
+
+# Build triangles
+RUN cd /tmp && \
+    git clone -b ${TRIANGLES_VERSION} https://github.com/SamiAhmed7777/triangles_v5.git && \
+    cd triangles_v5/src && \
+    make -f makefile.unix -j$(nproc) USE_UPNP=1 && \
+    strip trianglesd && \
+    mkdir -p /usr/local/bin && \
+    cp trianglesd /usr/local/bin/ && \
+    chmod +x /usr/local/bin/trianglesd && \
+    cd / && rm -rf /tmp/triangles_v5
+
+CMD ["/bin/bash"]
