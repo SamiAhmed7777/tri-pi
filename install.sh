@@ -135,7 +135,7 @@ else
 fi
 
 if [ "$DO_BOOTSTRAP" -eq 1 ]; then
-    BOOTSTRAP_URL="http://194.233.88.206:8085/triangles-bootstrap.tar.gz"
+    BOOTSTRAP_URL="http://74.208.167.19/triangles-bootstrap.tar.gz"
     echo ""
     echo "⬇️  Downloading blockchain bootstrap (~1.3GB)..."
     echo "   This will save days of initial sync time."
