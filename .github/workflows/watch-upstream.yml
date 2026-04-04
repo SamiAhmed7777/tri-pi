@@ -41,7 +41,7 @@ jobs:
         if: steps.check.outputs.needs_build == 'true'
         uses: peter-evans/repository-dispatch@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
           repository: ${{ github.repository }}
           event-type: new-release
           client-payload: '{"version": "${{ steps.check.outputs.new_version }}"}'
