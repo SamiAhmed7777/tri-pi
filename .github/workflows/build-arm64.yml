@@ -97,6 +97,9 @@ jobs:
           VERSION="${{ steps.get-version.outputs.version }}"
           PACKAGE_DIR="tri-pi-${VERSION}-arm64"
           
+          # Update VERSION file to match the triangles_v5 release
+          echo "$VERSION" > VERSION
+          
           mkdir -p releases
           tar czf "releases/${PACKAGE_DIR}.tar.gz" \
             bin/ docs/ install.sh README.md VERSION BOOTSTRAP.md
