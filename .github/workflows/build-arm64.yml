@@ -53,7 +53,7 @@ jobs:
           # Install dependencies
           apt-get update -qq
           apt-get install -y -qq \
-            git build-essential libtool autotools-dev automake pkg-config \
+            git build-essential cmake libtool autotools-dev automake pkg-config \
             libssl-dev libevent-dev bsdmainutils libboost-all-dev \
             libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates
           
@@ -73,18 +73,26 @@ jobs:
           make install
           ldconfig
           
-          # Clone and build triangles
+          # Clone and build triangles with CMake
           cd /tmp
           git clone --branch $VERSION --depth 1 https://github.com/SamiAhmed7777/triangles_v5.git
-          cd triangles_v5/src
+          cd triangles_v5
           
-          make -f makefile.unix clean 2>/dev/null || true
-          make -f makefile.unix -j$(nproc) USE_UPNP=1
-          strip trianglesd
+          mkdir build && cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_QT=OFF \
+            -DBUILD_DAEMON=ON \
+            -DBUILD_TESTS=OFF \
+            -DUSE_UPNP=ON \
+            -DUSE_TOR_EMBEDDED=OFF
+          
+          make -j$(nproc)
+          strip bin/trianglesd
           
           # Copy to workspace
           mkdir -p /workspace/bin
-          cp trianglesd /workspace/bin/
+          cp bin/trianglesd /workspace/bin/
           chmod +x /workspace/bin/trianglesd
           
           echo "Build complete!"
@@ -92,13 +100,15 @@ jobs:
           /workspace/bin/trianglesd --version || true
           '
       
+      - name: Update VERSION file
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          echo "$VERSION" > VERSION
+      
       - name: Create release package
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
           PACKAGE_DIR="tri-pi-${VERSION}-arm64"
-          
-          # Update VERSION file to match the triangles_v5 release
-          echo "$VERSION" > VERSION
           
           mkdir -p releases
           tar czf "releases/${PACKAGE_DIR}.tar.gz" \
@@ -118,7 +128,7 @@ jobs:
           git config user.email "bot@tri-pi.build"
           
           git add bin/trianglesd VERSION releases/
-          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release - Native ARM64 binary, GitHub Actions QEMU" || echo "No changes to commit"
+          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release" || echo "No changes to commit"
           
           git push origin main || echo "Already up to date"
       
@@ -145,7 +155,6 @@ jobs:
             
             - Native ARM64 trianglesd binary
             - One-command installer
-            - Complete build documentation
             - Tor integration
             - Updated seed nodes
             
