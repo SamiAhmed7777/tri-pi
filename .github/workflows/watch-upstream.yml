@@ -46,23 +46,6 @@ jobs:
           event-type: new-release
           client-payload: '{"version": "${{ steps.check.outputs.new_version }}"}'
       
-      - name: Create issue if build triggered
+      - name: Log build trigger
         if: steps.check.outputs.needs_build == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `New upstream release detected: ${{ steps.check.outputs.new_version }}`,
-              body: `Automated build triggered for triangles_v5 ${{ steps.check.outputs.new_version }}
-              
-              Check the [Actions tab](https://github.com/${{ github.repository }}/actions) to monitor build progress.
-              
-              Once complete, the new release will be available at:
-              https://github.com/${{ github.repository }}/releases
-              
-              ---
-              *This issue was created automatically by the upstream watcher.*`,
-              labels: ['automated-build']
-            })
+        run: echo "✅ Triggered ARM64 build for ${{ steps.check.outputs.new_version }}"
