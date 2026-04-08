@@ -20,8 +20,8 @@ Downloads the latest release, installs dependencies, creates a systemd service, 
 
 ```bash
 # Download latest release
-wget https://github.com/SamiAhmed7777/tri-pi/releases/latest/download/tri-pi-v5.5.0-arm64.tar.gz
-tar xzf tri-pi-v5.5.0-arm64.tar.gz
+wget https://github.com/SamiAhmed7777/tri-pi/releases/latest/download/tri-pi-$(curl -fsSL https://api.github.com/repos/SamiAhmed7777/triangles_v5/releases/latest | jq -r .tag_name | sed 's/^v//')-arm64.tar.gz
+tar xzf tri-pi-*.tar.gz
 
 # Install
 sudo ./install.sh
@@ -91,13 +91,13 @@ If bootstrap fails during install (server unreachable from your network), you ca
 
 ```bash
 # From a machine that can reach the bootstrap server:
-curl -O http://194.233.88.206:8085/triangles-bootstrap.tar.gz
-scp triangles-bootstrap.tar.gz pi@your-pi:/tmp/
+curl -O https://bootstrap.cryptographic-triangles.org/tri-bootstrap.tar.gz
+scp tri-bootstrap.tar.gz pi@your-pi:/tmp/
 
 # On the Pi:
 sudo systemctl stop triangles
 cd /root/.triangles
-tar xzf /tmp/triangles-bootstrap.tar.gz
+tar xzf /tmp/tri-bootstrap.tar.gz
 sudo systemctl start triangles
 ```
 
