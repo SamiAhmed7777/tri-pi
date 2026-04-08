@@ -32,8 +32,8 @@ echo "✓ ARM64 detected"
 echo "🔍 Checking latest release..."
 VERSION=$(curl -sL https://api.github.com/repos/SamiAhmed7777/tri-pi/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
 if [ -z "$VERSION" ]; then
-    echo "⚠️  Could not detect latest version, using v5.5.0"
-    VERSION="v5.5.0"
+    echo "⚠️  Could not detect latest version"
+    exit 1
 fi
 echo "   Latest: $VERSION"
 

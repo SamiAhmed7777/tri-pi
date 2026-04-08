@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-ARG TRIANGLES_VERSION=v5.5.0
+ARG TRIANGLES_VERSION=v5.7.6
 
 RUN apt-get update && apt-get install -y \
     git build-essential libtool autotools-dev automake pkg-config \
