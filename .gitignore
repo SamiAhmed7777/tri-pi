@@ -1,0 +1,22 @@
+# Generated build artifacts
+build/.qemu-work/
+build/.debug-mount/
+build/output/
+build/release/
+build/triangles-src/
+
+# Generated logs and reports
+build/*.log
+build/ARM64-BUILD-SUCCESS.md
+build/RELEASE_NOTES.md
+
+# Local helper scripts generated during experiments
+build/compile-arm64-final.sh
+build/compile-arm64-growpart.sh
+build/compile-arm64-ultra-clean.sh
+build/cross-compile-arm64.sh
+build/cross-compile-static.sh
+build/test-daemon-network.sh
+build/test-daemon-runtime.sh
+build/test-daemon-simple.sh
+build/test-daemon-sync.sh
