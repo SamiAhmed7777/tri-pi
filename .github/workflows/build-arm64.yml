@@ -73,8 +73,8 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq \
             git build-essential cmake libtool autotools-dev automake pkg-config \
-            libssl-dev libevent-dev bsdmainutils libboost-all-dev \
-            libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates jq
+            libssl-dev libevent-dev zlib1g-dev bsdmainutils libboost-all-dev \
+            libminiupnpc-dev libzmq3-dev curl wget ca-certificates jq autoconf automake liblzma-dev libzstd-dev
           
           # Build BerkeleyDB 4.8
           cd /tmp
@@ -92,11 +92,38 @@ jobs:
           make install
           ldconfig
           
-          # Clone and build triangles with CMake
+          # Clone and build triangles with embedded Tor enabled
           cd /tmp
           git clone --branch $VERSION --depth 1 https://github.com/SamiAhmed7777/triangles_v5.git
           cd triangles_v5
-          
+
+          if [ ! -d src/tor/tor-src/.git ]; then
+            git submodule update --init --recursive src/tor/tor-src || true
+          fi
+
+          if [ ! -d src/tor/tor-src ]; then
+            echo "Embedded Tor source tree missing at src/tor/tor-src" >&2
+            exit 1
+          fi
+
+          cd src/tor/tor-src
+          ./autogen.sh
+          ./configure \
+            --enable-static-tor \
+            --disable-module-relay \
+            --disable-module-dirauth \
+            --disable-asciidoc \
+            --disable-manpage \
+            --disable-html-manual \
+            --disable-unittests \
+            --disable-tool-name-check \
+            --with-openssl-dir=/usr \
+            --with-libevent-dir=/usr \
+            --with-zlib-dir=/usr \
+            --prefix=/usr/local
+          make -j$(nproc)
+
+          cd /tmp/triangles_v5
           mkdir build && cd build
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
@@ -104,7 +131,8 @@ jobs:
             -DBUILD_DAEMON=ON \
             -DBUILD_TESTS=OFF \
             -DUSE_UPNP=ON \
-            -DUSE_TOR_EMBEDDED=OFF
+            -DUSE_TOR_EMBEDDED=ON \
+            -DTOR_SOURCE_ROOT=/tmp/triangles_v5/src/tor/tor-src
           
           make -j$(nproc)
           strip bin/trianglesd
