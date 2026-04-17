@@ -34,8 +34,10 @@ To manually build a specific version:
 1. Go to **Actions** tab
 2. Select **Build TRI-PI ARM64** workflow
 3. Click **Run workflow**
-4. Enter version tag (e.g., `v5.4.5`)
+4. Optionally enter a version tag (for example `v5.8.1`)
 5. Click **Run workflow**
+
+If no version is supplied, the workflow builds the latest published `triangles_v5` release.
 
 ### Automatic Updates
 
@@ -48,4 +50,4 @@ No manual intervention needed!
 
 ### Version Tracking
 
-Current version stored in `VERSION` file at repo root.
+Current version is stored in `VERSION` at repo root and updated by the ARM64 build workflow to match the upstream `triangles_v5` tag it actually built.

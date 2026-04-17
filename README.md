@@ -113,9 +113,9 @@ trianglesd manages Tor automatically:
 
 ## Automated Builds
 
-New releases are built automatically via GitHub Actions when upstream triangles_v5 publishes a release. The CI uses QEMU ARM64 emulation on GitHub-hosted runners.
+New releases are built automatically via GitHub Actions when upstream `triangles_v5` publishes a release. The CI uses QEMU ARM64 emulation on GitHub-hosted runners.
 
-**Manual trigger:** [Actions](https://github.com/SamiAhmed7777/tri-pi/actions) → "Build TRI-PI ARM64" → "Run workflow"
+**Manual trigger:** [Actions](https://github.com/SamiAhmed7777/tri-pi/actions) → "Build TRI-PI ARM64" → "Run workflow". You can leave the version blank to build the latest upstream release, or provide a specific upstream tag such as `v5.8.1`.
 
 ## Network
 

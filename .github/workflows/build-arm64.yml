@@ -1,31 +1,50 @@
 name: Build TRI-PI ARM64
 
 on:
-  # Triggered when triangles_v5 has a new release
   repository_dispatch:
     types: [new-release]
-  
-  # Manual trigger (always builds latest)
   workflow_dispatch:
+    inputs:
+      version:
+        description: "triangles_v5 tag to build (example: v5.8.1). Leave empty to use latest upstream release."
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   build-arm64:
-    # Use GitHub Actions QEMU for ARM64 emulation
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout tri-pi repo
         uses: actions/checkout@v4
       
-      - name: Get latest triangles version
+      - name: Resolve target triangles version
         id: get-version
+        shell: bash
         run: |
-          # Always fetch latest from triangles_v5 repo
-          VERSION=$(curl -s https://api.github.com/repos/SamiAhmed7777/triangles_v5/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          VERSION=""
+
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            VERSION="${{ github.event.client_payload.version }}"
+          elif [ -n "${{ github.event.inputs.version || '' }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+
+          if [ -z "$VERSION" ]; then
+            VERSION=$(curl -fsSL https://api.github.com/repos/SamiAhmed7777/triangles_v5/releases/latest | jq -r .tag_name)
+          fi
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "Failed to resolve triangles_v5 release version" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "🔍 Building triangles $VERSION for ARM64"
       
       - name: Set up QEMU
@@ -55,7 +74,7 @@ jobs:
           apt-get install -y -qq \
             git build-essential cmake libtool autotools-dev automake pkg-config \
             libssl-dev libevent-dev bsdmainutils libboost-all-dev \
-            libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates
+            libminiupnpc-dev libzmq3-dev tor curl wget ca-certificates jq
           
           # Build BerkeleyDB 4.8
           cd /tmp
@@ -127,8 +146,8 @@ jobs:
           git config user.name "TRI-PI Builder"
           git config user.email "bot@tri-pi.build"
           
-          git add bin/trianglesd VERSION releases/
-          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release" || echo "No changes to commit"
+          git add VERSION bin/trianglesd releases/
+          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 release - Native ARM64 binary, GitHub Actions QEMU" || echo "No changes to commit"
           
           git push origin main || echo "Already up to date"
       
