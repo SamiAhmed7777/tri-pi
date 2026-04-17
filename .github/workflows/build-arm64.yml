@@ -59,13 +59,15 @@ jobs:
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
           echo "Building triangles $VERSION for ARM64..."
+          mkdir -p artifacts
           
           docker run --rm --platform linux/arm64 \
             -e VERSION="$VERSION" \
             -v $PWD:/workspace \
             -w /workspace \
             ubuntu:24.04 bash -c '
-          set -e
+          set -euo pipefail
+          exec > >(tee /workspace/artifacts/build-arm64.log) 2>&1
           
           echo "Building triangles $VERSION for ARM64..."
           
@@ -107,6 +109,7 @@ jobs:
           fi
 
           cd src/tor/tor-src
+          echo "=== Building embedded Tor ==="
           ./autogen.sh
           ./configure \
             --enable-static-tor \
@@ -122,9 +125,11 @@ jobs:
             --with-zlib-dir=/usr \
             --prefix=/usr/local
           make -j$(nproc)
+          find . -maxdepth 2 -name "*.a" -o -name "tor_api.h" | sort | tee /workspace/artifacts/libtor-files.txt
 
           cd /tmp/triangles_v5
           mkdir build && cd build
+          echo "=== CMake configure ==="
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_QT=OFF \
@@ -132,8 +137,12 @@ jobs:
             -DBUILD_TESTS=OFF \
             -DUSE_UPNP=ON \
             -DUSE_TOR_EMBEDDED=ON \
-            -DTOR_SOURCE_ROOT=/tmp/triangles_v5/src/tor/tor-src
+            -DTOR_SOURCE_ROOT=/tmp/triangles_v5/src/tor/tor-src | tee /workspace/artifacts/cmake-configure.log
           
+          echo "=== CMake cache ==="
+          grep -E "USE_TOR_EMBEDDED|TOR_SOURCE_ROOT|BUILD_DAEMON|BUILD_QT" CMakeCache.txt | tee /workspace/artifacts/cmake-cache-tor.txt
+          
+          echo "=== Build ==="
           make -j$(nproc)
           strip bin/trianglesd
           
@@ -143,8 +152,10 @@ jobs:
           chmod +x /workspace/bin/trianglesd
           
           echo "Build complete!"
-          file /workspace/bin/trianglesd
-          /workspace/bin/trianglesd --version || true
+          file /workspace/bin/trianglesd | tee /workspace/artifacts/trianglesd-file.txt
+          ldd /workspace/bin/trianglesd | tee /workspace/artifacts/trianglesd-ldd.txt || true
+          strings /workspace/bin/trianglesd | grep -i -E "tor_run_main|embedded tor|ENABLE_TOR_EMBEDDED|torrc|hidden service" | sort -u | tee /workspace/artifacts/trianglesd-tor-strings.txt || true
+          /workspace/bin/trianglesd --version | tee /workspace/artifacts/trianglesd-version.txt || true
           '
       
       - name: Update VERSION file
@@ -179,6 +190,14 @@ jobs:
           
           git push origin main || echo "Already up to date"
       
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tri-pi-arm64-build-diagnostics-${{ steps.get-version.outputs.version }}
+          path: artifacts/
+          if-no-files-found: warn
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:

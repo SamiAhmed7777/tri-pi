@@ -2,7 +2,12 @@
 # TRI-PI ARM64 Installation Script
 # For Raspberry Pi 4/5 (64-bit) and ARM64 servers
 
-set -e
+set -euo pipefail
+
+LOG_DIR="/var/log/tri-pi"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
@@ -83,6 +88,18 @@ fi
 
 # Install systemd service
 echo "Installing systemd service..."
+cat > /usr/local/bin/triangles-start-diagnostics.sh << SERVICEWRAP
+#!/bin/bash
+set -euo pipefail
+DATA_DIR="$DATA_DIR"
+LOG_DIR="/var/log/tri-pi"
+mkdir -p "$LOG_DIR"
+STAMP=
+$(printf 'date +%%Y%%m%%d-%%H%%M%%S')
+/usr/local/bin/trianglesd -daemon=0 -datadir="$DATA_DIR" >> "$LOG_DIR/runtime.log" 2>&1
+SERVICEWRAP
+chmod +x /usr/local/bin/triangles-start-diagnostics.sh
+
 cat > /etc/systemd/system/triangles.service << SERVICE
 [Unit]
 Description=Triangles Cryptocurrency Node
@@ -91,12 +108,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/trianglesd -daemon=0 -datadir=$DATA_DIR
+ExecStart=/usr/local/bin/triangles-start-diagnostics.sh
 ExecStop=/usr/local/bin/trianglesd -datadir=$DATA_DIR stop
 Restart=on-failure
 RestartSec=30
 TimeoutStopSec=120
 LimitNOFILE=65536
+StandardOutput=append:/var/log/tri-pi/systemd-stdout.log
+StandardError=append:/var/log/tri-pi/systemd-stderr.log
 
 [Install]
 WantedBy=multi-user.target
@@ -173,9 +192,12 @@ echo ""
 echo "📋 View logs:"
 echo "   journalctl -u triangles -f"
 echo "   tail -f $DATA_DIR/debug.log"
+echo "   tail -f /var/log/tri-pi/runtime.log"
+echo "   tail -f /var/log/tri-pi/systemd-stderr.log"
 echo ""
 echo "🧅 Tor onion address (generated on first run):"
 echo "   cat $DATA_DIR/onion/hostname"
 echo ""
 echo "🔄 The node will auto-start on boot."
+echo "🧪 Installer log: $LOG_FILE"
 echo ""

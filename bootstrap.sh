@@ -5,7 +5,12 @@
 # Downloads the latest release, installs dependencies, creates systemd service,
 # and optionally bootstraps the blockchain. ~60 second setup.
 
-set -e
+set -euo pipefail
+
+LOG_DIR="/var/log/tri-pi"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/bootstrap-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "╔═══════════════════════════════════════╗"
 echo "║   TRI-PI Bootstrap Installer          ║"
@@ -109,6 +114,16 @@ else
 fi
 
 # Systemd service
+cat > /usr/local/bin/triangles-start-diagnostics.sh << SERVICEWRAP
+#!/bin/bash
+set -euo pipefail
+DATA_DIR="$DATA_DIR"
+LOG_DIR="/var/log/tri-pi"
+mkdir -p "$LOG_DIR"
+/usr/local/bin/trianglesd -daemon=0 -datadir="$DATA_DIR" >> "$LOG_DIR/runtime.log" 2>&1
+SERVICEWRAP
+chmod +x /usr/local/bin/triangles-start-diagnostics.sh
+
 cat > /etc/systemd/system/triangles.service << SERVICE
 [Unit]
 Description=Triangles Cryptocurrency Node
@@ -117,12 +132,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/trianglesd -daemon=0 -datadir=$DATA_DIR
+ExecStart=/usr/local/bin/triangles-start-diagnostics.sh
 ExecStop=/usr/local/bin/trianglesd -datadir=$DATA_DIR stop
 Restart=on-failure
 RestartSec=30
 TimeoutStopSec=120
 LimitNOFILE=65536
+StandardOutput=append:/var/log/tri-pi/systemd-stdout.log
+StandardError=append:/var/log/tri-pi/systemd-stderr.log
 
 [Install]
 WantedBy=multi-user.target
@@ -182,6 +199,10 @@ echo "╚═══════════════════════�
 echo ""
 echo "📊 Check status:  trianglesd -datadir=$DATA_DIR getinfo"
 echo "📋 View logs:     journalctl -u triangles -f"
+echo "                  tail -f $DATA_DIR/debug.log"
+echo "                  tail -f /var/log/tri-pi/runtime.log"
+echo "                  tail -f /var/log/tri-pi/systemd-stderr.log"
 echo "🧅 Onion address: cat $DATA_DIR/onion/hostname"
 echo "🔄 Auto-starts on boot"
+echo "🧪 Bootstrap log: $LOG_FILE"
 echo ""
