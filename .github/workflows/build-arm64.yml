@@ -110,6 +110,7 @@ jobs:
 
           cd src/tor/tor-src
           echo "=== Building embedded Tor ==="
+          export LDFLAGS="-L/usr/lib/aarch64-linux-gnu -L/usr/lib"
           ./autogen.sh
           ./configure \
             --enable-static-tor \
