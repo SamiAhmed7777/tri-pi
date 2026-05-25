@@ -110,7 +110,10 @@ jobs:
 
           cd src/tor/tor-src
           echo "=== Building embedded Tor ==="
-          export LDFLAGS="-L/usr/lib/aarch64-linux-gnu -L/usr/lib"
+          export LDFLAGS="-L/usr/lib/aarch64-linux-gnu -L/usr/lib -L/usr/aarch64-linux-gnu/lib"
+          export CFLAGS="--sysroot=/usr/aarch64-linux-gnu -mabi=lp64"
+          export CPPFLAGS="--sysroot=/usr/aarch64-linux-gnu"
+          export LD_LIBRARY_PATH="/usr/aarch64-linux-gnu/lib:${LD_LIBRARY_PATH}"
           ./autogen.sh
           ./configure \
             --enable-static-tor \
@@ -131,6 +134,7 @@ jobs:
           cd /tmp/triangles_v5
           mkdir build && cd build
           echo "=== CMake configure ==="
+          export LDFLAGS="-L/usr/lib/aarch64-linux-gnu -L/usr/lib -L/usr/aarch64-linux-gnu/lib -Wl,--dynamic-linker=/lib/ld-linux-aarch64.so.3"
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_QT=OFF \
