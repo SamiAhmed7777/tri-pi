@@ -79,11 +79,10 @@ jobs:
             libminiupnpc-dev libzmq3-dev curl wget ca-certificates jq autoconf automake liblzma-dev libzstd-dev \
             librocksdb-dev libsnappy-dev libbz2-dev libdb++-dev
           
-          # BerkeleyDB: use the system libdb++-dev (5.3) to match the upstream
-          # Linux release build. (The old recipe compiled BDB 4.8 from source and
-          # fetched config.sub from savannah gitweb, which is flaky and was the
-          # cause of "configure: error: cannot run ../dist/config.sub". BDB 4.8
-          # also mismatched the network's 5.3/6.2 wallet format.)
+          # BerkeleyDB: use the system libdb++-dev 5.3 to match the upstream
+          # Linux release build. The old recipe built BDB 4.8 from source and
+          # fetched config.sub from savannah gitweb, which was flaky and broke
+          # the build; 4.8 also mismatched the 5.3/6.2 network wallet format.
           
           # Clone and build triangles with embedded Tor enabled
           cd /tmp
