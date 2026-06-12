@@ -77,23 +77,13 @@ jobs:
             git build-essential cmake libtool autotools-dev automake pkg-config \
             libssl-dev libevent-dev zlib1g-dev bsdmainutils libboost-all-dev \
             libminiupnpc-dev libzmq3-dev curl wget ca-certificates jq autoconf automake liblzma-dev libzstd-dev \
-            librocksdb-dev libsnappy-dev libbz2-dev
+            librocksdb-dev libsnappy-dev libbz2-dev libdb++-dev
           
-          # Build BerkeleyDB 4.8
-          cd /tmp
-          curl -sL -o db-4.8.30.NC.tar.gz http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz
-          tar xzf db-4.8.30.NC.tar.gz
-          cd db-4.8.30.NC/build_unix
-          
-          # Update config scripts for ARM64
-          curl -sL -o ../dist/config.guess "http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD"
-          curl -sL -o ../dist/config.sub "http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD"
-          chmod +x ../dist/config.guess ../dist/config.sub
-          
-          ../dist/configure --enable-cxx --disable-shared --with-pic --prefix=/usr/local
-          make -j$(nproc)
-          make install
-          ldconfig
+          # BerkeleyDB: use the system libdb++-dev (5.3) to match the upstream
+          # Linux release build. (The old recipe compiled BDB 4.8 from source and
+          # fetched config.sub from savannah gitweb, which is flaky and was the
+          # cause of "configure: error: cannot run ../dist/config.sub". BDB 4.8
+          # also mismatched the network's 5.3/6.2 wallet format.)
           
           # Clone and build triangles with embedded Tor enabled
           cd /tmp
