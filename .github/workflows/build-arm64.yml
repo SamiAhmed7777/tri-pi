@@ -76,7 +76,8 @@ jobs:
           apt-get install -y -qq \
             git build-essential cmake libtool autotools-dev automake pkg-config \
             libssl-dev libevent-dev zlib1g-dev bsdmainutils libboost-all-dev \
-            libminiupnpc-dev libzmq3-dev curl wget ca-certificates jq autoconf automake liblzma-dev libzstd-dev
+            libminiupnpc-dev libzmq3-dev curl wget ca-certificates jq autoconf automake liblzma-dev libzstd-dev \
+            librocksdb-dev libsnappy-dev libbz2-dev
           
           # Build BerkeleyDB 4.8
           cd /tmp
@@ -101,6 +102,14 @@ jobs:
 
           if [ ! -d src/tor/tor-src/.git ]; then
             git submodule update --init --recursive src/tor/tor-src || true
+          fi
+
+          # secp256k1 is a hard dependency since the v5.9 libsecp256k1 ECDSA
+          # migration — CMake fatal-errors if src/secp256k1 is not populated.
+          git submodule update --init --recursive src/secp256k1 || git submodule update --init src/secp256k1 || true
+          if [ ! -f src/secp256k1/CMakeLists.txt ]; then
+            echo "secp256k1 submodule missing at src/secp256k1" >&2
+            exit 1
           fi
 
           if [ ! -d src/tor/tor-src ]; then
