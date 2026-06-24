@@ -1,0 +1,58 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+      - name: Lint all shell scripts
+        run: |
+          set -e
+          # Skip bin/ (downloaded binary, not real shell)
+          # Skip build/ (downloaded from upstream)
+          find . -name '*.sh' \
+            -not -path './bin/*' \
+            -not -path './build/*' \
+            -not -path './.git/*' \
+            -print0 | xargs -0 shellcheck --severity=warning
+
+  upgrade-tests:
+    name: Upgrade flow tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run upgrade.sh tests
+        run: bash tests/test_upgrade.sh
+
+  doctor-tests:
+    name: Doctor flow tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tri-pi-doctor.sh tests
+        run: bash tests/test_doctor.sh
+
+  installer-tests:
+    name: Installer tests (existing)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run installer tests
+        run: bash tests/test_installer.sh
+
+  binary-tests:
+    name: Binary presence tests (existing)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run binary tests
+        run: bash tests/test_binary.sh
