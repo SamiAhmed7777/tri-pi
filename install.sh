@@ -1,141 +1,69 @@
 #!/bin/bash
 # TRI-PI ARM64 Installation Script
 # For Raspberry Pi 4/5 (64-bit) and ARM64 servers
+#
+# For upgrades of an existing install, use upgrade.sh instead.
+# For diagnostics, use tri-pi-doctor.sh.
 
 set -euo pipefail
-
-LOG_DIR="/var/log/tri-pi"
-mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
-exec > >(tee -a "$LOG_FILE") 2>&1
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
+source "${SCRIPT_DIR}/lib/common.sh"
+
+_tpi_init_logging "install"
 
 echo "====================================="
-echo "  TRI-PI $VERSION ARM64 Installer"
+echo "  TRI-PI ARM64 Installer"
+echo "  (Target: $TRI_PI_DATA_DIR)"
 echo "====================================="
 
-if [ "$(id -u)" != "0" ]; then
-   echo "Error: This script must be run as root (use sudo)"
-   exit 1
-fi
-
-# Detect architecture
-ARCH=$(uname -m)
-if [ "$ARCH" != "aarch64" ]; then
-    echo "Error: This package is for ARM64 (aarch64) only."
-    echo "Detected architecture: $ARCH"
-    exit 1
-fi
-
-echo "✓ ARM64 architecture detected"
+tpi_require_root
+tpi_require_arm64
+tpi_check_disk_space "$TRI_PI_DATA_DIR"
 
 # Install dependencies
-echo "Installing dependencies..."
+echo ""
+echo "─── Dependencies ────────────────────────────────────"
 apt-get update -qq
-apt-get install -y -qq tor curl > /dev/null 2>&1
-
-echo "✓ Dependencies installed"
+apt-get install -y -qq tor curl jq > /dev/null 2>&1
+tpi_ok "Installed: tor, curl, jq"
 
 # Install binary
-echo "Installing trianglesd..."
-cp "$SCRIPT_DIR/bin/trianglesd" /usr/local/bin/
-chmod +x /usr/local/bin/trianglesd
+echo ""
+echo "─── Binary ─────────────────────────────────────────"
+if [ ! -f "$SCRIPT_DIR/bin/trianglesd" ]; then
+    tpi_die "Missing bin/trianglesd in $SCRIPT_DIR. Wrong package?"
+fi
+cp "$SCRIPT_DIR/bin/trianglesd" "$TRI_PI_BIN_PATH"
+chmod +x "$TRI_PI_BIN_PATH"
+tpi_ok "Binary installed to $TRI_PI_BIN_PATH ($(tpi_binary_version))"
 
-echo "✓ Binary installed to /usr/local/bin/trianglesd"
-
-# Determine data directory
-DATA_DIR="/root/.triangles"
-mkdir -p "$DATA_DIR"
-
-# Create config
-if [ ! -f "$DATA_DIR/triangles.conf" ]; then
-    echo "Creating default configuration..."
-    
-    RPC_PASS=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-    
-    cat > "$DATA_DIR/triangles.conf" << CONFIG
-# TRI-PI $VERSION Configuration
-server=1
-listen=1
-
-# RPC settings
-rpcuser=tripi
-rpcpassword=$RPC_PASS
-rpcallowip=127.0.0.1
-rpcport=19199
-
-# Network
-port=24112
-maxconnections=50
-
-# Performance tuning for ARM/Pi
-dbcache=100
-maxmempool=50
-
-# Seed nodes
-addnode=194.233.88.206
-addnode=74.208.167.19
-addnode=179.189.35.51
-CONFIG
-
-    chmod 600 "$DATA_DIR/triangles.conf"
-    echo "✓ Configuration created at $DATA_DIR/triangles.conf"
+# Data directory + config
+echo ""
+echo "─── Configuration ──────────────────────────────────"
+mkdir -p "$TRI_PI_DATA_DIR"
+if [ ! -f "${TRI_PI_DATA_DIR}/triangles.conf" ]; then
+    tpi_write_default_config "$TRI_PI_DATA_DIR" "$(tpi_binary_version)"
 else
-    echo "✓ Existing configuration found"
+    tpi_info "Existing config at ${TRI_PI_DATA_DIR}/triangles.conf — preserved"
 fi
 
-# Install systemd service
-echo "Installing systemd service..."
-cat > /usr/local/bin/triangles-start-diagnostics.sh << SERVICEWRAP
-#!/bin/bash
-set -euo pipefail
-DATA_DIR="$DATA_DIR"
-LOG_DIR="/var/log/tri-pi"
-mkdir -p "$LOG_DIR"
-STAMP=
-$(printf 'date +%%Y%%m%%d-%%H%%M%%S')
-/usr/local/bin/trianglesd -daemon=0 -datadir="$DATA_DIR" >> "$LOG_DIR/runtime.log" 2>&1
-SERVICEWRAP
-chmod +x /usr/local/bin/triangles-start-diagnostics.sh
-
-cat > /etc/systemd/system/triangles.service << SERVICE
-[Unit]
-Description=Triangles Cryptocurrency Node
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/triangles-start-diagnostics.sh
-ExecStop=/usr/local/bin/trianglesd -datadir=$DATA_DIR stop
-Restart=on-failure
-RestartSec=30
-TimeoutStopSec=120
-LimitNOFILE=65536
-StandardOutput=append:/var/log/tri-pi/systemd-stdout.log
-StandardError=append:/var/log/tri-pi/systemd-stderr.log
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-systemctl daemon-reload
+# Systemd
+echo ""
+echo "─── Systemd ────────────────────────────────────────"
+tpi_write_systemd_unit "$TRI_PI_DATA_DIR"
 systemctl enable triangles > /dev/null 2>&1
-echo "✓ Systemd service installed and enabled"
+tpi_ok "Service enabled (auto-start on boot)"
 
-# Offer blockchain bootstrap
+# Blockchain bootstrap (interactive)
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Blockchain Sync Options"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-if [ -f "$DATA_DIR/blk0001.dat" ]; then
-    EXISTING_SIZE=$(du -sh "$DATA_DIR/blk0001.dat" | cut -f1)
-    echo "  Existing blockchain data found ($EXISTING_SIZE)"
-    echo ""
+if [ -f "${TRI_PI_DATA_DIR}/blk0001.dat" ]; then
+    EXISTING_SIZE=$(du -sh "${TRI_PI_DATA_DIR}/blk0001.dat" | cut -f1)
+    tpi_info "Existing blockchain data found ($EXISTING_SIZE)"
     read -p "  Skip bootstrap and keep existing data? [Y/n]: " KEEP_EXISTING
     if [[ "$KEEP_EXISTING" =~ ^[Nn] ]]; then
         DO_BOOTSTRAP=1
@@ -159,45 +87,52 @@ if [ "$DO_BOOTSTRAP" -eq 1 ]; then
     echo "⬇️  Downloading blockchain bootstrap (~1.3GB)..."
     echo "   This will save days of initial sync time."
     echo ""
-    
+
     if curl -L --connect-timeout 30 --max-time 600 -o /tmp/triangles-bootstrap.tar.gz "$BOOTSTRAP_URL" 2>/dev/null; then
         DL_SIZE=$(du -sh /tmp/triangles-bootstrap.tar.gz | cut -f1)
-        echo "✓ Downloaded ($DL_SIZE)"
-        echo "📦 Extracting to $DATA_DIR/ ..."
-        
+        tpi_ok "Downloaded ($DL_SIZE)"
+        echo "📦 Extracting to $TRI_PI_DATA_DIR/ ..."
+
         # Remove old blockchain data before extracting
-        rm -rf "$DATA_DIR/blk0001.dat" "$DATA_DIR/txleveldb" "$DATA_DIR/database"
-        tar xzf /tmp/triangles-bootstrap.tar.gz -C "$DATA_DIR/"
+        rm -rf "${TRI_PI_DATA_DIR}/blk0001.dat" "${TRI_PI_DATA_DIR}/txleveldb" "${TRI_PI_DATA_DIR}/database"
+        tar xzf /tmp/triangles-bootstrap.tar.gz -C "${TRI_PI_DATA_DIR}/"
         rm -f /tmp/triangles-bootstrap.tar.gz
-        
-        echo "✓ Blockchain bootstrap deployed"
+
+        tpi_ok "Blockchain bootstrap deployed"
     else
-        echo "⚠️  Bootstrap download failed (server unreachable)"
-        echo "   No worries — your node will sync from peers instead."
-        echo "   Tip: you can manually scp a bootstrap later."
+        tpi_warn "Bootstrap download failed (server unreachable)"
+        tpi_warn "  No worries — your node will sync from peers instead."
+        tpi_warn "  Tip: you can manually scp a bootstrap later."
     fi
 fi
 
+# Pre-flight on the tor state dir (lessons from 2026-06-23 incident)
+tpi_check_tor_state "$TRI_PI_DATA_DIR" || {
+    tpi_warn "  Tor state directory is non-empty — recommend cleaning before first start"
+    tpi_repair_tor_state "$TRI_PI_DATA_DIR"
+}
+
 echo ""
 echo "====================================="
-echo "  ✅ TRI-PI $VERSION Installed!"
+echo "  ✅ TRI-PI $(tpi_binary_version) Installed!"
 echo "====================================="
 echo ""
 echo "🚀 Start your node:"
 echo "   sudo systemctl start triangles"
 echo ""
 echo "📊 Check status:"
-echo "   trianglesd -datadir=$DATA_DIR getinfo"
+echo "   trianglesd -datadir=$TRI_PI_DATA_DIR getinfo"
+echo "   sudo $(basename "$0" | sed 's/install/doctor/')   # diagnostic report"
 echo ""
 echo "📋 View logs:"
 echo "   journalctl -u triangles -f"
-echo "   tail -f $DATA_DIR/debug.log"
-echo "   tail -f /var/log/tri-pi/runtime.log"
-echo "   tail -f /var/log/tri-pi/systemd-stderr.log"
+echo "   tail -f $TRI_PI_DATA_DIR/debug.log"
+echo "   tail -f $TRI_PI_RUNTIME_LOG"
+echo "   tail -f $TRI_PI_SYSTEMD_STDERR"
 echo ""
 echo "🧅 Tor onion address (generated on first run):"
-echo "   cat $DATA_DIR/onion/hostname"
+echo "   cat $TRI_PI_DATA_DIR/onion/hostname"
 echo ""
-echo "🔄 The node will auto-start on boot."
-echo "🧪 Installer log: $LOG_FILE"
+echo "🔄 Auto-starts on boot. To upgrade later: sudo ./upgrade.sh"
+echo "🧪 Installer log: $TPI_LOG_FILE"
 echo ""

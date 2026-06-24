@@ -34,8 +34,12 @@ sudo ./install.sh
 | `bin/trianglesd` | Native ARM64 binary (stripped, ~5MB) |
 | `install.sh` | Interactive installer with bootstrap option |
 | `bootstrap.sh` | One-liner installer (fetches latest release) |
+| `upgrade.sh` | In-place upgrade of an existing install — preserves config, wallet, blockchain, and Tor state |
+| `tri-pi-doctor.sh` | Diagnostic report — checks binary version, service state, port bindings, Tor state, recent errors |
+| `lib/common.sh` | Shared library (paths, pre-flights, systemd unit generation) sourced by all scripts |
 | `BOOTSTRAP.md` | Blockchain bootstrap guide |
 | `docs/BUILD.md` | Build-from-source instructions |
+| `tests/` | Non-destructive test suite (55 tests across 4 scripts) |
 
 ## After Installation
 
@@ -100,6 +104,99 @@ cd /root/.triangles
 tar xzf /tmp/tri-bootstrap.tar.gz
 sudo systemctl start triangles
 ```
+
+## Upgrading an Existing Install
+
+To upgrade an existing TRI-PI install to a new upstream release without losing your config, wallet, or Tor hidden service:
+
+```bash
+# From the tri-pi release tarball:
+sudo ./upgrade.sh
+
+# Or from a specific version:
+sudo ./upgrade.sh --to v5.9.25
+
+# Or from a local tarball (useful for air-gapped upgrades):
+sudo ./upgrade.sh --tarball /tmp/tri-pi-v5.9.25-arm64.tar.gz
+
+# Just check what's available without making changes:
+sudo ./upgrade.sh --check
+```
+
+The upgrade flow:
+
+1. Stops the triangles service
+2. Pre-flight checks: disk space, P2P port, stale Tor state
+3. Downloads (or uses local) tarball, verifies SHA256
+4. Backs up the current binary as `trianglesd.bak-<version>` (kept for rollback)
+5. Atomic-swaps the new binary
+6. Restarts the service and verifies version + height
+
+**What is preserved (do not regress):**
+
+- `triangles.conf` — your RPC creds, seed nodes, dbcache tuning
+- `wallet.dat` — funds, keypool, transaction history
+- `blk0001.dat`, `txleveldb/`, `database/` — synced blockchain (re-syncing takes days)
+- `tor_data/` — Tor hidden service key (losing this = new `.onion` address, peers re-learn you)
+- `/var/log/tri-pi/` — all historical logs
+
+**Rollback** if a new version breaks your node (within 30 days):
+
+```bash
+sudo systemctl stop triangles
+sudo cp /usr/local/bin/trianglesd.bak-v5.9.23 /usr/local/bin/trianglesd
+sudo systemctl start triangles
+```
+
+## Diagnostics — `tri-pi-doctor.sh`
+
+When something is wrong, run the doctor for a structured report:
+
+```bash
+sudo ./tri-pi-doctor.sh           # human-readable
+sudo ./tri-pi-doctor.sh --json    # machine-readable for monitoring
+```
+
+The doctor checks 14 things including the two failure modes that catch most operators:
+
+- **P2P port 24112 held by another process** — almost always stale Tor from a prior failed start. The doctor tells you the exact `kill -9` command.
+- **Stale `tor_data/state` directory** — Tor fails to start with "State file is not a file". The doctor tells you the exact `rm -rf` + `systemctl restart` command.
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Healthy |
+| 1 | Warnings (degraded but functional) |
+| 2 | Failures (likely not functional) |
+| 3 | Cannot run (not ARM64 / not root) |
+
+## Common Failure Modes
+
+These are the issues that actually come up in the field. The doctor detects all of them automatically.
+
+### "Triangles: Tor failed to start. Triangles requires Tor to operate."
+
+The Tor DataDirectory at `/root/.triangles/tor_data/state` is a non-empty directory instead of a file. Trianglesd can't auto-recover from this. Fix:
+
+```bash
+sudo rm -rf /root/.triangles/tor_data/state
+sudo systemctl restart triangles
+```
+
+### "Unable to bind to 0.0.0.0:24112 — Triangles is probably already running"
+
+A stale Tor or trianglesd process is holding the P2P port. The restart loop killed the daemon but not the child. Fix:
+
+```bash
+sudo ss -tlnp | grep 24112    # see who's holding it
+sudo kill -9 <pid>            # kill the stale process
+sudo systemctl restart triangles
+```
+
+### Daemon restarts repeatedly, eventually gives up with "Max restart retries"
+
+The entrypoint's restart loop killed trianglesd but didn't clean up child processes. After 10 failed restarts (5–10 minutes), the service stops trying. Diagnose with `tri-pi-doctor.sh` to find the specific failure.
 
 ## Tor Integration
 
