@@ -168,7 +168,7 @@ fi
 
 # ─── Disk space ─────────────────────────────────────────────────────────────
 
-DATA_FREE=$(df -PB1 "$TRI_PI_DATA_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+DATA_FREE=$(df -PB1 "$TRI_PI_DATA_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || true)
 if [ -n "$DATA_FREE" ]; then
     FREE_IEC=$(numfmt --to=iec "$DATA_FREE")
     if [ "$DATA_FREE" -lt 1073741824 ]; then  # < 1GB

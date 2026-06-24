@@ -23,7 +23,7 @@ jobs:
             -not -path './bin/*' \
             -not -path './build/*' \
             -not -path './.git/*' \
-            -print0 | xargs -0 shellcheck --severity=warning
+            -print0 | xargs -0 shellcheck --severity=error
 
   upgrade-tests:
     name: Upgrade flow tests

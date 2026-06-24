@@ -43,7 +43,17 @@ TRI_PI_MIN_FREE_DISK_BYTES="${TRI_PI_MIN_FREE_DISK_BYTES:-209715200}"
 
 _tpi_init_logging() {
     local script_name="${1:-tri-pi}"
-    mkdir -p "$TRI_PI_LOG_DIR"
+    # Production: write logs to /var/log/tri-pi (root-only).
+    # Non-root (tests, CI): fall back to a temp dir so the script still
+    # runs cleanly without needing sudo. Real installs always run as root.
+    if ! mkdir -p "$TRI_PI_LOG_DIR" 2>/dev/null; then
+        TRI_PI_LOG_DIR="$(mktemp -d)/tri-pi-logs"
+        TRI_PI_RUNTIME_LOG="${TRI_PI_LOG_DIR}/runtime.log"
+        TRI_PI_SYSTEMD_STDOUT="${TRI_PI_LOG_DIR}/systemd-stdout.log"
+        TRI_PI_SYSTEMD_STDERR="${TRI_PI_LOG_DIR}/systemd-stderr.log"
+        export TRI_PI_LOG_DIR TRI_PI_RUNTIME_LOG TRI_PI_SYSTEMD_STDOUT TRI_PI_SYSTEMD_STDERR
+        mkdir -p "$TRI_PI_LOG_DIR"
+    fi
     local stamp
     stamp=$(date +%Y%m%d-%H%M%S)
     TPI_LOG_FILE="${TRI_PI_LOG_DIR}/${script_name}-${stamp}.log"
@@ -91,7 +101,7 @@ tpi_require_arm64() {
 tpi_check_disk_space() {
     local data_dir="$1"
     local free_bytes
-    free_bytes=$(df -PB1 "$data_dir" 2>/dev/null | awk 'NR==2 {print $4}')
+    free_bytes=$(df -PB1 "$data_dir" 2>/dev/null | awk 'NR==2 {print $4}' || true)
     if [ -z "$free_bytes" ] || [ "$free_bytes" -lt "$TRI_PI_MIN_FREE_DISK_BYTES" ]; then
         tpi_die "Need at least $(numfmt --to=iec "$TRI_PI_MIN_FREE_DISK_BYTES") free in $data_dir (have: ${free_bytes:-0} bytes)"
     fi
