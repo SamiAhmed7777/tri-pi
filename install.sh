@@ -30,10 +30,10 @@ tpi_ok "Installed: tor, curl, jq"
 # Install binary
 echo ""
 echo "─── Binary ─────────────────────────────────────────"
-if [ ! -f "$SCRIPT_DIR/bin/trianglesd" ]; then
-    tpi_die "Missing bin/trianglesd in $SCRIPT_DIR. Wrong package?"
+if [ ! -f "$SCRIPT_DIR/bin/tri7d" ]; then
+    tpi_die "Missing bin/tri7d in $SCRIPT_DIR. Wrong package?"
 fi
-cp "$SCRIPT_DIR/bin/trianglesd" "$TRI_PI_BIN_PATH"
+cp "$SCRIPT_DIR/bin/tri7d" "$TRI_PI_BIN_PATH"
 chmod +x "$TRI_PI_BIN_PATH"
 tpi_ok "Binary installed to $TRI_PI_BIN_PATH ($(tpi_binary_version))"
 
@@ -71,38 +71,45 @@ if [ -f "${TRI_PI_DATA_DIR}/blk0001.dat" ]; then
         DO_BOOTSTRAP=0
     fi
 else
-    echo "  [1] Download bootstrap blockchain (FAST — recommended)"
-    echo "      ~1.3GB download, starts near current block height"
+    echo "  TRI7-era sync options:"
+    echo "  [1] Fresh sync via P2P gap-fill (recommended — default)"
+    echo "      tri7d backfills headers/blocks from seed peers; no download needed."
     echo ""
-    echo "  [2] Sync from scratch (SLOW — days/weeks on Pi)"
-    echo "      Start from genesis block"
+    echo "  [2] Fetch a tri7 blk0001.dat archive (if you host one)"
+    echo "      Set TRI_PI_BOOTSTRAP_URL (and optionally TRI_PI_BOOTSTRAP_SHA256)"
+    echo "      to the archive URL before running this installer."
+    echo "      The canonical archive lives on DNS2: /root/.triangles/blk0001.dat"
     echo ""
     read -p "  Your choice [1/2]: " SYNC_CHOICE
-    [[ "$SYNC_CHOICE" == "1" ]] && DO_BOOTSTRAP=1 || DO_BOOTSTRAP=0
+    [[ "$SYNC_CHOICE" == "2" ]] && DO_BOOTSTRAP=1 || DO_BOOTSTRAP=0
 fi
 
 if [ "$DO_BOOTSTRAP" -eq 1 ]; then
-    BOOTSTRAP_URL="http://74.208.167.19/triangles-bootstrap.tar.gz"
-    echo ""
-    echo "⬇️  Downloading blockchain bootstrap (~1.3GB)..."
-    echo "   This will save days of initial sync time."
-    echo ""
-
-    if curl -L --connect-timeout 30 --max-time 600 -o /tmp/triangles-bootstrap.tar.gz "$BOOTSTRAP_URL" 2>/dev/null; then
-        DL_SIZE=$(du -sh /tmp/triangles-bootstrap.tar.gz | cut -f1)
-        tpi_ok "Downloaded ($DL_SIZE)"
-        echo "📦 Extracting to $TRI_PI_DATA_DIR/ ..."
-
-        # Remove old blockchain data before extracting
-        rm -rf "${TRI_PI_DATA_DIR}/blk0001.dat" "${TRI_PI_DATA_DIR}/txleveldb" "${TRI_PI_DATA_DIR}/database"
-        tar xzf /tmp/triangles-bootstrap.tar.gz -C "${TRI_PI_DATA_DIR}/"
-        rm -f /tmp/triangles-bootstrap.tar.gz
-
-        tpi_ok "Blockchain bootstrap deployed"
+    # TRI7 era: the legacy bootstrap tarballs (leveldb chainstate from the C++
+    # client) are dead URLs AND incompatible with tri7d. tri7d consumes a raw
+    # blk0001.dat block archive.
+    BOOTSTRAP_URL="${TRI_PI_BOOTSTRAP_URL:-}"
+    if [ -z "$BOOTSTRAP_URL" ]; then
+        tpi_warn "TRI_PI_BOOTSTRAP_URL is not set — nothing to fetch."
+        tpi_warn "  The node will fresh-sync via P2P gap-fill instead (recommended)."
     else
-        tpi_warn "Bootstrap download failed (server unreachable)"
-        tpi_warn "  No worries — your node will sync from peers instead."
-        tpi_warn "  Tip: you can manually scp a bootstrap later."
+        echo ""
+        echo "⬇️  Downloading tri7 blk0001.dat archive..."
+        echo "   URL: $BOOTSTRAP_URL"
+        echo ""
+
+        if curl -L --connect-timeout 30 --max-time 3600 -o "${TRI_PI_DATA_DIR}/blk0001.dat.part" "$BOOTSTRAP_URL" 2>/dev/null; then
+            DL_SIZE=$(du -sh "${TRI_PI_DATA_DIR}/blk0001.dat.part" | cut -f1)
+            tpi_ok "Downloaded ($DL_SIZE)"
+            if [ -n "${TRI_PI_BOOTSTRAP_SHA256:-}" ]; then
+                echo "${TRI_PI_BOOTSTRAP_SHA256}  ${TRI_PI_DATA_DIR}/blk0001.dat.part" | sha256sum -c -
+                tpi_ok "SHA256 verified"
+            fi
+            mv "${TRI_PI_DATA_DIR}/blk0001.dat.part" "${TRI_PI_DATA_DIR}/blk0001.dat"
+            tpi_ok "tri7 block archive installed"
+        else
+            tpi_warn "Archive download failed — the node will fresh-sync via P2P gap-fill."
+        fi
     fi
 fi
 
@@ -121,7 +128,7 @@ echo "🚀 Start your node:"
 echo "   sudo systemctl start triangles"
 echo ""
 echo "📊 Check status:"
-echo "   trianglesd -datadir=$TRI_PI_DATA_DIR getinfo"
+echo "   tri7d --status --state-dir $TRI_PI_DATA_DIR   # (jq) height + peers"
 echo "   sudo $(basename "$0" | sed 's/install/doctor/')   # diagnostic report"
 echo ""
 echo "📋 View logs:"

@@ -117,11 +117,11 @@ fi
 
 # ─── Process check ──────────────────────────────────────────────────────────
 
-DAEMON_PID=$(pgrep -f "${TRI_PI_BIN_PATH}.*datadir=${TRI_PI_DATA_DIR}" || true)
+DAEMON_PID=$(pgrep -f "${TRI_PI_BIN_PATH}.*--state-dir ${TRI_PI_DATA_DIR}" || true)
 if [ -n "$DAEMON_PID" ]; then
     record OK "daemon-process" "pid=$DAEMON_PID"
 else
-    record FAIL "daemon-process" "no trianglesd process matching expected datadir"
+    record FAIL "daemon-process" "no tri7d process matching --state-dir ${TRI_PI_DATA_DIR}"
 fi
 
 # ─── Port bindings (the key learning) ──────────────────────────────────────
@@ -130,8 +130,8 @@ fi
 P2P_BINDING=$(ss -tlnp 2>/dev/null | grep -E ":${TRI_PI_P2P_PORT}\b" || true)
 if [ -z "$P2P_BINDING" ]; then
     record FAIL "p2p-port-${TRI_PI_P2P_PORT}" "not bound — daemon may be dead or still starting"
-elif echo "$P2P_BINDING" | grep -q trianglesd; then
-    record OK "p2p-port-${TRI_PI_P2P_PORT}" "bound by trianglesd"
+elif echo "$P2P_BINDING" | grep -q tri7d; then
+    record OK "p2p-port-${TRI_PI_P2P_PORT}" "bound by tri7d"
 else
     # Common failure: stale Tor from a prior failed start
     HOLDER=$(echo "$P2P_BINDING" | grep -oE 'users:\(\("[^"]+"' | head -1 | tr -d '"' | cut -d'(' -f2)
@@ -140,8 +140,8 @@ fi
 
 # RPC port
 RPC_BINDING=$(ss -tlnp 2>/dev/null | grep -E ":${TRI_PI_RPC_PORT}\b" || true)
-if [ -n "$RPC_BINDING" ] && echo "$RPC_BINDING" | grep -q trianglesd; then
-    record OK "rpc-port-${TRI_PI_RPC_PORT}" "bound by trianglesd (localhost)"
+if [ -n "$RPC_BINDING" ] && echo "$RPC_BINDING" | grep -q tri7d; then
+    record OK "rpc-port-${TRI_PI_RPC_PORT}" "bound by tri7d (localhost)"
 else
     record WARN "rpc-port-${TRI_PI_RPC_PORT}" "not bound — RPC unavailable"
 fi

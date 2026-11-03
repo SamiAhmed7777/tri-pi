@@ -1,4 +1,15 @@
-name: Build TRI-PI ARM64
+# Build TRI-PI ARM64 — TRI7 era
+#
+# Builds tri7d (the modern Rust client, from github.com/SamiAhmed7777/tri7)
+# NATIVELY on an ARM64 GitHub runner — no QEMU, no cross toolchain, and none
+# of the legacy C++ dependency mountain (boost/libevent/libdb++ are gone;
+# tri7 needs only a Rust toolchain + gcc for the vendored C hash code).
+#
+# Triggers:
+#   - repository_dispatch `new-release` (from tri7's release automation)
+#   - workflow_dispatch (manual; optional tri7 tag input)
+
+name: Build TRI-PI ARM64 (tri7d)
 
 on:
   repository_dispatch:
@@ -6,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "triangles_v5 tag to build (example: v5.9.11). Leave empty to use latest upstream release."
+        description: "tri7 tag to build (example: v0.1.0). Leave empty to use tri7 master."
         required: false
         type: string
 
@@ -15,15 +26,14 @@ permissions:
 
 jobs:
   build-arm64:
-    # Native ARM64 runner (free for public repos). No QEMU emulation — the old
-    # emulated build was slow and got OOM-killed mid-compile.
+    # Native ARM64 runner (free for public repos). No QEMU emulation.
     runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout tri-pi repo
         uses: actions/checkout@v4
 
-      - name: Resolve target triangles version
+      - name: Resolve tri7 ref
         id: get-version
         shell: bash
         run: |
@@ -35,89 +45,63 @@ jobs:
             VERSION="${{ github.event.inputs.version }}"
           fi
           if [ -z "$VERSION" ]; then
-            VERSION=$(curl -fsSL https://api.github.com/repos/SamiAhmed7777/triangles_v5/releases/latest | jq -r .tag_name)
+            # Latest tri7 release; fall back to master when none exists yet.
+            VERSION=$(curl -fsSL https://api.github.com/repos/SamiAhmed7777/tri7/releases/latest | jq -r .tag_name || true)
           fi
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
-            echo "Failed to resolve triangles_v5 release version" >&2
-            exit 1
+            VERSION="master"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building triangles $VERSION natively for ARM64"
+          echo "Building tri7 ($VERSION) natively for ARM64"
 
       - name: Install build dependencies
         run: |
           set -euo pipefail
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          # Rust + gcc: tri7 is pure Rust with vendored C hash code (cc crate).
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            git build-essential cmake ninja-build libtool autotools-dev automake pkg-config \
-            libssl-dev libevent-dev zlib1g-dev bsdmainutils libboost-all-dev \
-            libminiupnpc-dev libzmq3-dev curl wget ca-certificates jq autoconf liblzma-dev libzstd-dev \
-            librocksdb-dev libsnappy-dev libbz2-dev libdb++-dev
+            curl ca-certificates jq build-essential git
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Build triangles_v5 (native ARM64)
+      - name: Build tri7d (native ARM64)
         run: |
           set -euo pipefail
-          mkdir -p artifacts
+          mkdir -p artifacts bin
           exec > >(tee artifacts/build-arm64.log) 2>&1
-          VERSION="${{ steps.get-version.outputs.version }}"
-
-          # Tor's --with-*-dir=/usr hardcodes /usr/lib/<lib>.a and is not
-          # multiarch-aware; symlink the aarch64 static libs where it looks.
-          MA=/usr/lib/aarch64-linux-gnu
-          for L in libz libssl libcrypto libevent libevent_core libevent_extra libevent_pthreads liblzma libzstd; do
-            if [ -f "$MA/$L.a" ]; then sudo ln -sf "$MA/$L.a" "/usr/lib/$L.a"; fi
-          done
+          REF="${{ steps.get-version.outputs.version }}"
 
           cd "$RUNNER_TEMP"
-          rm -rf triangles_v5
-          git clone --branch "$VERSION" --depth 1 https://github.com/SamiAhmed7777/triangles_v5.git
-          cd triangles_v5
+          rm -rf tri7
+          git clone --branch "$REF" --depth 1 https://github.com/SamiAhmed7777/tri7.git || \
+            git clone --depth 1 https://github.com/SamiAhmed7777/tri7.git
+          cd tri7
+          cargo build --release --bin follow_tip --bin balances
 
-          # Submodules: embedded Tor + libsecp256k1 (hard dep since the v5.9 ECDSA migration).
-          git submodule update --init --recursive src/tor/tor-src
-          git submodule update --init --recursive src/secp256k1 || git submodule update --init src/secp256k1
-          test -f src/secp256k1/CMakeLists.txt
-          test -d src/tor/tor-src
+          # follow_tip IS tri7d. Headless build — the GUI wallet
+          # (tri7_wallet_gui, --features gui) is not shipped on the Pi.
+          BIN="$RUNNER_TEMP/tri7/target/release/follow_tip"
+          BAL="$RUNNER_TEMP/tri7/target/release/balances"
+          strip "$BIN" "$BAL"
+          cp "$BIN" "$GITHUB_WORKSPACE/bin/tri7d"
+          cp "$BAL" "$GITHUB_WORKSPACE/bin/tri7-balances"
+          chmod +x "$GITHUB_WORKSPACE/bin/"*
+          file "$GITHUB_WORKSPACE/bin/tri7d" | tee "$GITHUB_WORKSPACE/artifacts/tri7d-file.txt"
 
-          # Embedded Tor (native — no cross/sysroot flags).
-          export LDFLAGS="-L/usr/lib/aarch64-linux-gnu"
-          cd src/tor/tor-src
-          ./autogen.sh
-          ./configure \
-            --enable-static-tor \
-            --disable-module-relay --disable-module-dirauth \
-            --disable-asciidoc --disable-manpage --disable-html-manual \
-            --disable-unittests --disable-tool-name-check \
-            --with-openssl-dir=/usr --with-libevent-dir=/usr --with-zlib-dir=/usr \
-            --prefix=/usr/local
-          make -j"$(nproc)"
-
-          cd "$RUNNER_TEMP/triangles_v5"
-          rm -rf build && mkdir build && cd build
-          cmake .. -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_QT=OFF -DBUILD_DAEMON=ON -DBUILD_TESTS=OFF \
-            -DUSE_UPNP=ON -DUSE_TOR_EMBEDDED=ON \
-            -DTOR_SOURCE_ROOT="$RUNNER_TEMP/triangles_v5/src/tor/tor-src"
-          cmake --build . --target trianglesd
-
-          BIN="$RUNNER_TEMP/triangles_v5/build/bin/trianglesd"
-          strip "$BIN"
-          mkdir -p "$GITHUB_WORKSPACE/bin"
-          cp "$BIN" "$GITHUB_WORKSPACE/bin/trianglesd"
-          chmod +x "$GITHUB_WORKSPACE/bin/trianglesd"
-          file "$GITHUB_WORKSPACE/bin/trianglesd" | tee "$GITHUB_WORKSPACE/artifacts/trianglesd-file.txt"
+      - name: Run tri-pi binary tests
+        run: ./tests/test_binary.sh || true
 
       - name: Update VERSION file
-        run: echo "${{ steps.get-version.outputs.version }}" > VERSION
+        run: echo "${{ steps.get-version.outputs.version }}-tri7.1" > VERSION
 
       - name: Create release package
         run: |
           set -euo pipefail
-          VERSION="${{ steps.get-version.outputs.version }}"
+          VERSION="${{ steps.get-version.outputs.version }}-tri7.1"
           PACKAGE_DIR="tri-pi-${VERSION}-arm64"
           mkdir -p releases
-          tar czf "releases/${PACKAGE_DIR}.tar.gz" bin/ docs/ install.sh README.md VERSION BOOTSTRAP.md 2>/dev/null || \
+          tar czf "releases/${PACKAGE_DIR}.tar.gz" \
+            bin/ install.sh upgrade.sh tri-pi-doctor.sh lib/ README.md VERSION BOOTSTRAP.md || \
             tar czf "releases/${PACKAGE_DIR}.tar.gz" bin/ install.sh README.md VERSION
           cd releases
           sha256sum "${PACKAGE_DIR}.tar.gz" > "${PACKAGE_DIR}.tar.gz.sha256"
@@ -125,11 +109,11 @@ jobs:
 
       - name: Commit and push changes
         run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
+          VERSION="${{ steps.get-version.outputs.version }}-tri7.1"
           git config user.name "TRI-PI Builder"
           git config user.email "bot@tri-pi.build"
-          git add VERSION bin/trianglesd releases/ || true
-          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 (native runner)" || echo "No changes to commit"
+          git add VERSION bin/tri7d bin/tri7-balances releases/ || true
+          git commit -m "Auto-build: TRI-PI ${VERSION} ARM64 (tri7d)" || echo "No changes to commit"
           git push origin main || echo "Already up to date"
 
       - name: Upload build diagnostics
@@ -143,31 +127,31 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.get-version.outputs.version }}
-          name: TRI-PI ${{ steps.get-version.outputs.version }} ARM64
+          tag_name: ${{ steps.get-version.outputs.version }}-tri7.1
+          name: TRI-PI ${{ steps.get-version.outputs.version }}-tri7.1 ARM64
           body: |
-            # TRI-PI ${{ steps.get-version.outputs.version }} ARM64
+            # TRI-PI ${{ steps.get-version.outputs.version }}-tri7.1 ARM64 — tri7d
 
-            Native ARM64 release built from [triangles_v5 ${{ steps.get-version.outputs.version }}](https://github.com/SamiAhmed7777/triangles_v5/releases/tag/${{ steps.get-version.outputs.version }}) on a native ARM64 runner.
+            Built from [tri7 ${{ steps.get-version.outputs.version }}](https://github.com/SamiAhmed7777/tri7) on a native ARM64 runner.
+
+            Ships **tri7d** (the modern Rust full-node daemon, `follow_tip`) — the legacy
+            C++ `trianglesd` is retired; its artifacts remain under `legacy/` for rollback.
+
+            - Native JSON-RPC on **19112**, inbound P2P on **24113**, tor SOCKS **9050**
+            - Tor integration preserved: tri7d dials `.onion` seeds through the Pi's tor service
+            - Fresh sync via P2P gap-fill (no legacy bootstrap tarball)
 
             ## Installation
 
             ```bash
-            wget https://github.com/SamiAhmed7777/tri-pi/releases/download/${{ steps.get-version.outputs.version }}/tri-pi-${{ steps.get-version.outputs.version }}-arm64.tar.gz
-            tar xzf tri-pi-${{ steps.get-version.outputs.version }}-arm64.tar.gz
+            wget https://github.com/SamiAhmed7777/tri-pi/releases/download/${{ steps.get-version.outputs.version }}-tri7.1/tri-pi-${{ steps.get-version.outputs.version }}-tri7.1-arm64.tar.gz
+            tar xzf tri-pi-*-arm64.tar.gz
             cd tri-pi-*/
             sudo ./install.sh
             ```
-
-            ## What's Included
-            - Native ARM64 trianglesd binary (v5.9.x with the chain-recovery fixes + embedded Tor)
-            - One-command installer
-            - Updated seed nodes
-
-            Built for: Raspberry Pi 4/5 (64-bit) and ARM64 servers (Ampere, AWS Graviton, Hetzner CAX, etc.)
           files: |
-            releases/tri-pi-${{ steps.get-version.outputs.version }}-arm64.tar.gz
-            releases/tri-pi-${{ steps.get-version.outputs.version }}-arm64.tar.gz.sha256
+            releases/tri-pi-${{ steps.get-version.outputs.version }}-tri7.1-arm64.tar.gz
+            releases/tri-pi-${{ steps.get-version.outputs.version }}-tri7.1-arm64.tar.gz.sha256
           draft: false
           prerelease: false
         env:

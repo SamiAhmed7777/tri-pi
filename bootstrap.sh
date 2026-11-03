@@ -82,11 +82,11 @@ echo ""
 echo "📦 Installing..."
 tar xzf tri-pi.tar.gz
 
-if [ ! -f bin/trianglesd ]; then
-    tpi_die "Tarball did not contain bin/trianglesd"
+if [ ! -f bin/tri7d ]; then
+    tpi_die "Tarball did not contain bin/tri7d"
 fi
 
-cp bin/trianglesd "$TRI_PI_BIN_PATH"
+cp bin/tri7d "$TRI_PI_BIN_PATH"
 chmod +x "$TRI_PI_BIN_PATH"
 tpi_ok "Binary installed: $(tpi_binary_version)"
 
@@ -114,25 +114,22 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Blockchain Sync"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "  [1] Download bootstrap (~1.3GB) — FAST, recommended"
-echo "  [2] Sync from peers — slow (days/weeks on Pi)"
-echo ""
-read -p "  Choice [1/2]: " SYNC_CHOICE
-
-if [[ "$SYNC_CHOICE" == "1" ]]; then
-    BOOTSTRAP_URL="http://74.208.167.19/triangles-bootstrap.tar.gz"
-    echo ""
-    echo "⬇️  Downloading blockchain bootstrap..."
-
-    if curl -L --connect-timeout 30 --max-time 600 -o /tmp/triangles-bootstrap.tar.gz "$BOOTSTRAP_URL" 2>/dev/null; then
-        tpi_ok "Downloaded"
-        echo "📦 Extracting..."
-        tar xzf /tmp/triangles-bootstrap.tar.gz -C "${TRI_PI_DATA_DIR}/"
-        rm -f /tmp/triangles-bootstrap.tar.gz
-        tpi_ok "Blockchain deployed"
+# TRI7 era: legacy bootstrap tarballs are dead AND incompatible with tri7d.
+# Default is a fresh sync via P2P gap-fill; a tri7 blk0001.dat archive can be
+# fetched by setting TRI_PI_BOOTSTRAP_URL (+ optional TRI_PI_BOOTSTRAP_SHA256).
+if [ -n "${TRI_PI_BOOTSTRAP_URL:-}" ] && [ ! -f "${TRI_PI_DATA_DIR}/blk0001.dat" ]; then
+    echo "⬇️  Downloading tri7 blk0001.dat archive from TRI_PI_BOOTSTRAP_URL..."
+    if curl -L --connect-timeout 30 --max-time 3600 -o "${TRI_PI_DATA_DIR}/blk0001.dat.part" "$TRI_PI_BOOTSTRAP_URL" 2>/dev/null; then
+        if [ -n "${TRI_PI_BOOTSTRAP_SHA256:-}" ]; then
+            echo "${TRI_PI_BOOTSTRAP_SHA256}  ${TRI_PI_DATA_DIR}/blk0001.dat.part" | sha256sum -c -
+        fi
+        mv "${TRI_PI_DATA_DIR}/blk0001.dat.part" "${TRI_PI_DATA_DIR}/blk0001.dat"
+        tpi_ok "tri7 block archive installed"
     else
-        tpi_warn "Bootstrap unreachable — will sync from peers"
+        tpi_warn "Archive download failed — the node will fresh-sync via P2P gap-fill."
     fi
+else
+    tpi_info "No TRI_PI_BOOTSTRAP_URL set — fresh sync via P2P gap-fill (tri7d backfills from seed peers)."
 fi
 
 # Cleanup
@@ -156,7 +153,7 @@ echo "╔═══════════════════════�
 echo "║       ✅ Installation Complete!       ║"
 echo "╚═══════════════════════════════════════╝"
 echo ""
-echo "📊 Check status:  trianglesd -datadir=$TRI_PI_DATA_DIR getinfo"
+echo "📊 Check status:  tri7d --status --state-dir $TRI_PI_DATA_DIR"
 echo "🩺 Run doctor:    sudo $(basename "$0" | sed 's/bootstrap/tri-pi-doctor/')"
 echo "🔄 Upgrade later: sudo curl -sSL https://raw.githubusercontent.com/SamiAhmed7777/tri-pi/main/upgrade.sh | bash"
 echo ""

@@ -1,143 +1,71 @@
 #!/bin/bash
+# TRI-PI release packager — TRI7 era (tri7d).
+# Packages bin/tri7d + bin/tri7-balances (aarch64 tri7 client binaries) with
+# the TRI7-era installer/lib/doctor into a release tarball.
 set -euo pipefail
 
 VERSION="${1:-}"
-
-if [ -z "$VERSION" ] && [ -f .github/docker/Dockerfile.arm64 ]; then
-  VERSION=$(sed -n 's/^ARG TRIANGLES_VERSION=v//p' .github/docker/Dockerfile.arm64 | head -n1)
+if [ -z "$VERSION" ] && [ -f VERSION ]; then
+  VERSION="$(cat VERSION | tr -d '[:space:]')"
 fi
-
 if [ -z "$VERSION" ]; then
-  echo "ERROR: Could not determine TRI-PI package version." >&2
-  echo "Pass a version explicitly, e.g. ./build/package-release.sh 5.7.6" >&2
+  echo "ERROR: pass a version, e.g. ./build/package-release.sh v0.1.0-tri7.1" >&2
   exit 1
 fi
 
 RELEASE_NAME="tri-pi-${VERSION}-arm64"
 RELEASE_DIR="build/release/${RELEASE_NAME}"
 
-echo "=== Packaging TRI-PI Release v${VERSION} ==="
+echo "=== Packaging TRI-PI Release ${VERSION} (tri7d) ==="
 
-# Clean and create release directory
 rm -rf build/release
-mkdir -p "$RELEASE_DIR"/{bin,backend,frontend,services,systemd,docs}
+mkdir -p "$RELEASE_DIR"/{bin,docs}
 
-# Copy binaries
-echo "📦 Copying binaries..."
-cp build/output/trianglesd-arm64 "$RELEASE_DIR/bin/trianglesd"
-cp build/output/trianglesd-arm64-static "$RELEASE_DIR/bin/trianglesd-static"
+echo "📦 Copying tri7d binaries..."
+[ -f bin/tri7d ]          || { echo "ERROR: bin/tri7d missing — build it first (see .github/workflows/build-arm64.yml or docs in README)" >&2; exit 1; }
+[ -f bin/tri7-balances ]  || { echo "ERROR: bin/tri7-balances missing" >&2; exit 1; }
+cp bin/tri7d bin/tri7-balances "$RELEASE_DIR/bin/"
 chmod +x "$RELEASE_DIR/bin/"*
 
-# Copy installer
-echo "📦 Copying installer..."
-cp setup/install.sh "$RELEASE_DIR/"
-chmod +x "$RELEASE_DIR/install.sh"
+echo "📦 Copying installer + library..."
+cp install.sh upgrade.sh tri-pi-doctor.sh "$RELEASE_DIR/"
+mkdir -p "$RELEASE_DIR/lib"
+cp lib/common.sh "$RELEASE_DIR/lib/"
+chmod +x "$RELEASE_DIR/"*.sh
 
-# Copy application files
-echo "📦 Copying application files..."
-cp -r backend/* "$RELEASE_DIR/backend/" 2>/dev/null || true
-cp -r frontend/* "$RELEASE_DIR/frontend/" 2>/dev/null || true
-cp -r services/* "$RELEASE_DIR/services/" 2>/dev/null || true
-cp -r config "$RELEASE_DIR/" 2>/dev/null || true
-cp -r tor "$RELEASE_DIR/" 2>/dev/null || true
-
-# Copy documentation
 echo "📦 Copying documentation..."
-cp README.md "$RELEASE_DIR/docs/"
-cp CLAUDE.md "$RELEASE_DIR/docs/" 2>/dev/null || true
+cp README.md BOOTSTRAP.md VERSION "$RELEASE_DIR/docs/" 2>/dev/null || true
 [ -f LICENSE ] && cp LICENSE "$RELEASE_DIR/docs/" || echo "MIT License" > "$RELEASE_DIR/docs/LICENSE"
 
-# Create installation instructions
 cat > "$RELEASE_DIR/INSTALL.md" << 'INSTALL'
-# TRI-PI Installation Guide
+# TRI-PI Installation Guide (tri7d)
 
-## Quick Install (Recommended)
+## Quick Install
 
-```bash
 sudo ./install.sh
-```
 
-This will:
-- Install trianglesd to /opt/tri-pi/
-- Install Flask backend API
-- Install web dashboard frontend
-- Create systemd services
-- Set up Tor integration
-- Configure everything automatically
-- Start all services
+What gets installed:
+- tri7d binary -> /usr/local/bin/tri7d  (also tri7-balances)
+- Config       -> <data>/triangles.conf (rpcuser/rpcpassword; ports via systemd wrapper)
+- systemd      -> triangles.service: tri7d --forever, RPC 19112, P2P 24113,
+                  tor SOCKS 9050 (the Pi's tor service), onion seeds via --onion
 
-## What Gets Installed
+Status: tri7d --status --state-dir <data>   (JSON: height, peers, staleness)
+Sync:   fresh sync via P2P gap-fill (default) or TRI_PI_BOOTSTRAP_URL archive.
 
-- **Triangles Daemon**: /opt/tri-pi/bin/trianglesd
-- **Backend API**: /opt/tri-pi/backend/ (Flask on port 8081)
-- **Web Dashboard**: /opt/tri-pi/frontend/ (served via Caddy)
-- **Config**: ~/.triangles/triangles.conf
-- **Services**: 
-  - triangles.service (daemon)
-  - tri-pi-backend.service (API)
-  - tri-pi-frontend.service (dashboard)
-
-## System Requirements
-
-- Raspberry Pi 4 or 5 (4GB+ RAM recommended)
-- Raspberry Pi OS (64-bit) Bookworm or later
-- 32GB+ storage (SD card or SSD)
-- Internet connection
-
-## Post-Installation
-
-Access the web dashboard:
-```bash
-http://<your-pi-ip>:8080
-```
-
-Check daemon status:
-```bash
-systemctl status triangles
-```
-
-View wallet info:
-```bash
-/opt/tri-pi/bin/trianglesd getinfo
-```
-
-## Manual Installation (Advanced)
-
-If you prefer manual setup, see docs/MANUAL_INSTALL.md
-
-## Support
-
-- GitHub: https://github.com/SamiAhmed7777/triangles_v5
-- Git: https://git.sami/sami7777/tri-pi
-- Explorer: https://blocks.cryptographic-triangles.org
+NOTE: tri7d is a node daemon. Staking/wallet operations need a wallet and the
+RPC surface — see the tri7 repo (github.com/SamiAhmed7777/tri7).
 INSTALL
 
-# Create checksums
 echo "🔐 Generating checksums..."
-cd "$RELEASE_DIR/bin"
-sha256sum trianglesd > trianglesd.sha256
-sha256sum trianglesd-static > trianglesd-static.sha256
-cd - > /dev/null
+(cd "$RELEASE_DIR/bin" && sha256sum tri7d tri7-balances > SHA256SUMS)
 
-# Create release tarball
 echo "📦 Creating release tarball..."
-cd build/release
-tar czf "${RELEASE_NAME}.tar.gz" "$RELEASE_NAME"
-cd - > /dev/null
+(cd build/release && tar czf "${RELEASE_NAME}.tar.gz" "$RELEASE_NAME")
+(cd build/release && sha256sum "${RELEASE_NAME}.tar.gz" > "${RELEASE_NAME}.tar.gz.sha256")
 
-# Generate final checksums
-cd build/release
-sha256sum "${RELEASE_NAME}.tar.gz" > "${RELEASE_NAME}.tar.gz.sha256"
-cd - > /dev/null
-
-echo ""
-echo "✅ Release package created!"
 echo ""
 echo "📦 Package: build/release/${RELEASE_NAME}.tar.gz"
-echo "🔐 SHA256: $(cat build/release/${RELEASE_NAME}.tar.gz.sha256 | cut -d' ' -f1)"
-echo "📊 Size: $(du -h build/release/${RELEASE_NAME}.tar.gz | cut -f1)"
-echo ""
-echo "Package contents:"
-du -sh "build/release/${RELEASE_NAME}"/*
-echo ""
+echo "🔐 SHA256: $(cut -d' ' -f1 "build/release/${RELEASE_NAME}.tar.gz.sha256")"
+echo "📊 Size: $(du -h "build/release/${RELEASE_NAME}.tar.gz" | cut -f1)"
 echo "Ready for GitHub release upload!"

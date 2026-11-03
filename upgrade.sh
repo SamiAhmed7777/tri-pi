@@ -15,7 +15,7 @@
 #     .onion, peers have to re-learn you)
 #
 # What this changes:
-#   - /usr/local/bin/trianglesd (the binary)
+#   - /usr/local/bin/tri7d (the binary)
 #   - The systemd service unit (only if the template changed)
 #
 # What this checks first (lessons from the Hetzner + tridock incident 2026-06-23):
@@ -25,7 +25,7 @@
 #   4. Target version is actually newer than the installed one
 #   5. Disk has enough free space for binary swap + headroom
 #
-# Rollback: the previous binary is kept as trianglesd.bak-<version> for 30 days.
+# Rollback: the previous binary is kept as tri7d.bak-<version> for 30 days.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -170,10 +170,10 @@ else
 fi
 
 tar xzf "$WORK_DIR/tri-pi.tar.gz" -C "$WORK_DIR"
-NEW_BIN="$WORK_DIR/bin/trianglesd"
+NEW_BIN="$WORK_DIR/bin/tri7d"
 
 if [ ! -f "$NEW_BIN" ]; then
-    tpi_die "Tarball did not contain bin/trianglesd"
+    tpi_die "Tarball did not contain bin/tri7d"
 fi
 
 NEW_VERSION="$(tpi_binary_version "$NEW_BIN")"
@@ -223,7 +223,7 @@ if [ "$SKIP_RESTART" -eq 0 ]; then
 
     if [ "$HEIGHT" = "unknown" ]; then
         tpi_warn "Could not read block height. Wait 30s for chain to load, then:"
-        tpi_warn "  ${TRI_PI_BIN_PATH} -datadir=$TRI_PI_DATA_DIR getinfo"
+        tpi_warn "  ${TRI_PI_BIN_PATH} --status --state-dir $TRI_PI_DATA_DIR"
     fi
 fi
 
