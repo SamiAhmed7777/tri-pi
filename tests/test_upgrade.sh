@@ -167,6 +167,16 @@ if grep -q "/tmp/tri-pi-test-data" /tmp/tri-pi-test.service 2>/dev/null; then
 else
     fail "Service unit missing data dir reference"
 fi
+# The unit must pass systemd-analyze verification (strict sandbox syntax)
+if command -v systemd-analyze >/dev/null 2>&1; then
+    if systemd-analyze verify /tmp/tri-pi-test.service 2>/dev/null; then
+        pass "systemd-analyze verify passes on the generated unit"
+    else
+        fail "systemd-analyze verify rejected the generated unit"
+    fi
+else
+    pass "systemd-analyze not available here (verify skipped)"
+fi
 # Service unit should reference the wrapper script in ExecStart
 if grep -q "tri-pi-test-wrapper.sh" /tmp/tri-pi-test.service 2>/dev/null; then
     pass "Service unit ExecStart points at the wrapper"

@@ -223,11 +223,13 @@ StandardOutput=append:${TRI_PI_SYSTEMD_STDOUT}
 StandardError=append:${TRI_PI_SYSTEMD_STDERR}
 
 # Hardening — TRI is a privacy coin; least-privilege applies.
-# NOTE: no ProtectHome=read-only — the WALLET lives under the data dir
-# (/root/.triangles/wallet.dat) and the daemon must write it. ProtectSystem
-# keeps /usr,/boot,/etc read-only, which is the part that matters.
+# ProtectSystem=strict mounts the ENTIRE filesystem read-only; ReadWritePaths
+# then grants back exactly what the daemon needs: its data dir (chain store,
+# wallet, onion state) and the log dir (StandardOutput append). That is real
+# write confinement, verified by systemd-analyze in the upgrade tests.
 NoNewPrivileges=true
-ProtectSystem=full
+ProtectSystem=strict
+ReadWritePaths=-${data_dir} -${TRI_PI_LOG_DIR}
 PrivateTmp=true
 
 [Install]
