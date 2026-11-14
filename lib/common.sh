@@ -35,11 +35,14 @@ set -euo pipefail
 TRI_PI_P2P_PORT="${TRI_PI_P2P_PORT:-24113}"
 TRI_PI_RPC_PORT="${TRI_PI_RPC_PORT:-19112}"
 TRI_PI_TOR_SOCKS_PORT="${TRI_PI_TOR_SOCKS_PORT:-9050}"
+# Wallet (UX 2026-11-14: TRI-PI is a fully functioning WALLET, not just a
+# node) — the daemon runs with --wallet so staking and sending work.
+TRI_PI_WALLET_PATH="${TRI_PI_WALLET_PATH:-${TRI_PI_DATA_DIR}/wallet.dat}"
 # Outbound attach targets. Explicit targets REPLACE tri7d's 127.0.0.1:24113
 # built-in default (a listening node must never attach to its own listener).
 # Onion targets dial through the tor SOCKS; clearnet targets go direct.
-: "${TRI_PI_SEED_ONIONS:=gxvrhv3qitnc6kobrhsrse46bmcfitnybapor3or3oczzuxn6hfzxyid.onion:24113 i6tk7soznftvoibtskwlezviskiererhjndpsmrff4kaxw7jnd5izfqd.onion:24112}"
-: "${TRI_PI_SEED_DIRECT:=100.85.236.10:24113}"
+: "${TRI_PI_SEED_ONIONS:=43kgtx6vcz2253vo5ybfq3ax5sj5mmw5dy4l64fypw74yauvje4gmbyd.onion:24113 gxvrhv3qitnc6kobrhsrse46bmcfitnybapor3or3oczzuxn6hfzxyid.onion:24113}"
+: "${TRI_PI_SEED_DIRECT:=}"
 
 # Required free disk space for install/upgrade (bytes) — 200MB covers the
 # binary, the .tar.gz extraction overhead, and 2x headroom for the daemon's
@@ -188,10 +191,11 @@ exec "${TRI_PI_BIN_PATH}" \\
   --forever \\
   --conf "\$DATA_DIR/triangles.conf" \\
   --state-dir "\$DATA_DIR" \\
+  --wallet "${TRI_PI_WALLET_PATH}" \\
   --rpc-port ${TRI_PI_RPC_PORT} \\
   --socks 127.0.0.1:${TRI_PI_TOR_SOCKS_PORT} \\
   --listen-port ${TRI_PI_P2P_PORT} \\
-  --listen-bind 0.0.0.0 \\
+  --listen-bind 127.0.0.1 \\
   --daemon ${TRI_PI_SEED_DIRECT} \\
   ${onion_flags} >> "${TRI_PI_RUNTIME_LOG}" 2>&1
 WRAPPER
@@ -218,10 +222,12 @@ LimitNOFILE=65536
 StandardOutput=append:${TRI_PI_SYSTEMD_STDOUT}
 StandardError=append:${TRI_PI_SYSTEMD_STDERR}
 
-# Hardening — TRI is a privacy coin; least-privilege applies
+# Hardening — TRI is a privacy coin; least-privilege applies.
+# NOTE: no ProtectHome=read-only — the WALLET lives under the data dir
+# (/root/.triangles/wallet.dat) and the daemon must write it. ProtectSystem
+# keeps /usr,/boot,/etc read-only, which is the part that matters.
 NoNewPrivileges=true
 ProtectSystem=full
-ProtectHome=read-only
 PrivateTmp=true
 
 [Install]

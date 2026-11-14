@@ -1,0 +1,234 @@
+#!/bin/bash
+# tri7-appliance — manage a TRI-PI wallet appliance (2026-11-14)
+#   tri7-appliance status                 balance, staking, peers, onion, wallet
+#   tri7-appliance backup                 tar wallet + state (private!)
+#   tri7-appliance restore <backup.tar.gz>
+#   tri7-appliance upgrade <new-bundle-dir>
+#
+# Restore is STAGED: the archive is validated member-by-member, extracted to a
+# private staging dir, the required contents verified, and only then swapped
+# into place (previous data dir kept as .pre-restore-<ts>). Extraction
+# failure can never corrupt live data.
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$REPO_DIR/lib/common.sh" ] && . "$REPO_DIR/lib/common.sh" || {
+    TRI_PI_DATA_DIR="${TRI_PI_DATA_DIR:-/root/.triangles}"
+    TRI_PI_SERVICE_PATH="${TRI_PI_SERVICE_PATH:-/etc/systemd/system/triangles.service}"
+}
+RPC_PORT="${TRI_PI_RPC_PORT:-19112}"
+WALLET="${TRI_PI_WALLET_PATH:-${TRI_PI_DATA_DIR}/wallet.dat}"
+SERVICE="triangles"
+
+# Service control — stubbable for behavioral tests (TRI_PI_SVC_MODE=fake).
+svc_stop()  { if [ "${TRI_PI_SVC_MODE:-systemd}" = "fake" ]; then echo "fake-stop" >> "${TRI_PI_SVC_LOG:-/dev/null}"; else systemctl stop  "$SERVICE"; fi; }
+svc_start() { if [ "${TRI_PI_SVC_MODE:-systemd}" = "fake" ]; then echo "fake-start" >> "${TRI_PI_SVC_LOG:-/dev/null}"; else systemctl start "$SERVICE"; fi; }
+
+# Crash-recovery: a marker records the in-progress swap so an interruption
+# between the two renames never leaves the appliance without a data dir.
+# The marker is written with real durability: fsync file, atomic rename into
+# place, then fsync the parent directory entry — power-loss safe.
+tpi_write_marker() { # <marker-path> <content> — rc!=0 if the durable write failed
+    local path="$1" content="$2" tmp
+    tmp="${path}.tmp.$$"
+    # exact bytes, NO trailing newline — the post-write comparison below is
+    # then genuinely byte-exact ($(cat) does not strip anything)
+    printf '%s' "$content" > "$tmp" || { rm -f "$tmp"; return 1; }
+    sync "$tmp" || { rm -f "$tmp"; return 1; }          # fsync the file data
+    if ! mv "$tmp" "$path"; then
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    fi
+    sync "$(dirname "$path")" || return 1               # fsync the dir entry
+    [ "$(cat "$path" 2>/dev/null)" = "$content" ]       # byte-exact verification
+}
+tpi_restore_recover() { # idempotent, safe to call on every start
+    local marker="$(dirname "$TRI_PI_DATA_DIR")/$(basename "$TRI_PI_DATA_DIR").restore-marker"
+    [ -f "$marker" ] || return 0
+    local current="$TRI_PI_DATA_DIR" backup
+    backup="$(cat "$marker")"
+    if [ -d "$current" ]; then
+        rm -f "$marker"   # swap completed before the crash — just clean up
+    elif [ -d "$backup" ]; then
+        mv "$backup" "$current"   # undo: put the known-good data back
+        rm -f "$marker"
+        echo "✓ recovered: interrupted restore rolled back, live data restored" >&2
+    else
+        rm -f "$marker"   # nothing recoverable; stop tracking
+    fi
+}
+
+rpc() { curl -sS --max-time 6 -X POST "http://127.0.0.1:${RPC_PORT}" -d "{\"method\":\"$1\"}" 2>/dev/null; }
+
+# ── archive validation (executable-testable) ──────────────────────────────
+# Refuses: unlistable/corrupt archives, absolute paths, .. traversal, members
+# outside basename(TRI_PI_DATA_DIR), and symlink/hardlink members (link
+# targets can escape the extraction root).
+tpi_validate_archive() { # <archive.tar.gz> -> stdout: member list; rc!=0 refused
+    local archive="$1" members dirbase
+    dirbase="$(basename "$TRI_PI_DATA_DIR")"
+    members="$(mktemp)"
+    if ! tar -tzf "$archive" > "$members" 2>/dev/null; then
+        echo "✗ refusing: cannot list archive (corrupt or missing)" >&2
+        rm -f "$members"; return 1
+    fi
+    if grep -qE '^/|(^|/)\.\.(/|$)' "$members"; then
+        echo "✗ refusing: archive contains absolute paths or .. traversal" >&2
+        rm -f "$members"; return 1
+    fi
+    # every member must be the data dir itself or inside it
+    if grep -qvE "^${dirbase}(/|$)" "$members"; then
+        echo "✗ refusing: archive contains members outside ${dirbase}/" >&2
+        rm -f "$members"; return 1
+    fi
+    # reject symlink/hardlink members outright (tar -tv marks them), and any
+    # special filesystem object (devices, FIFOs, sockets) — extraction runs
+    # as root, so only plain directories and regular files are acceptable.
+    if tar -tvzf "$archive" 2>/dev/null | awk '
+        $1 !~ /^-|^d/ { bad=1; exit }
+        END { exit !bad }'; then
+        echo "✗ refusing: archive contains symlink/hardlink/device/FIFO/socket members" >&2
+        rm -f "$members"; return 1
+    fi
+    cat "$members"
+    rm -f "$members"
+}
+
+# ── staged restore (executable-testable) ──────────────────────────────────
+tpi_stage_restore() { # <archive.tar.gz> <staging-parent-dir> -> prints staged data dir
+    local archive="$1" staging private
+    staging="$(mktemp -d "$2/tri7-restore.XXXXXX")"
+    # TOCTOU fix: validate and extract THE SAME private copy, not the
+    # caller-controlled original (which could change between passes).
+    private="$staging/.archive-prv.tgz"
+    cp "$archive" "$private" && chmod 0400 "$private"
+    tpi_validate_archive "$private" > /dev/null || { rm -rf "$staging"; return 1; }
+    tar -xzf "$private" -C "$staging" --no-same-owner --no-overwrite-dir
+    rm -f "$private"
+    # the extracted tree must contain the data dir
+    if [ ! -d "$staging/$(basename "$TRI_PI_DATA_DIR")" ]; then
+        echo "✗ refusing: staged tree missing $(basename "$TRI_PI_DATA_DIR")" >&2
+        rm -rf "$staging"; return 1
+    fi
+    echo "$staging/$(basename "$TRI_PI_DATA_DIR")"
+}
+
+status() {
+    echo "── service ──"
+    systemctl is-active "$SERVICE" || true
+    echo "── balance ──"
+    rpc getbalance | jq -r 'if .result != null then "TRI: \(.result)" else "(node not answering yet)" end' 2>/dev/null || echo "(node not answering yet)"
+    echo "── staking ──"
+    rpc getstakinginfo | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['result']
+print('staking:', d.get('staking'), '| enabled:', d.get('enabled'))
+print('last reward:', d.get('last_hit_utc'))
+" 2>/dev/null || echo "(node not answering yet)"
+    echo "── peers ──"
+    rpc getpeerinfo | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['result']
+print('count:', d.get('count'))
+" 2>/dev/null || echo "(node not answering yet)"
+    echo "── wallet ──"
+    tri7 wallet info --wallet "$WALLET" 2>/dev/null | head -2 || echo "(tri7 wallet info failed — wallet at $WALLET)"
+}
+
+do_backup() {
+    local OUT="/root/tri7-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+    systemctl stop "$SERVICE"
+    restore_svc() { systemctl start "$SERVICE" || true; }
+    trap restore_svc EXIT
+    tar -czf "$OUT" -C "$(dirname "$TRI_PI_DATA_DIR")" "$(basename "$TRI_PI_DATA_DIR")"
+    systemctl start "$SERVICE"
+    trap - EXIT
+    chmod 600 "$OUT"
+    echo "✓ backup written: $OUT"
+    echo "  CONTAINS THE FULL WALLET — KEEP IT PRIVATE."
+}
+
+do_restore() {
+    local archive="$1" staged current backup_dir marker
+    tpi_restore_recover
+    staged="$(tpi_stage_restore "$archive" "$(dirname "$TRI_PI_DATA_DIR")")" || exit 1
+    svc_stop
+    restore_svc() { svc_start || true; }
+    trap restore_svc EXIT
+    current="$TRI_PI_DATA_DIR"
+    backup_dir="${current}.pre-restore-$(date +%Y%m%d-%H%M%S)"
+    marker="$(dirname "$current")/$(basename "$current").restore-marker"
+    # Recovery metadata is DURABLY persisted (fsync file + dir) BEFORE any
+    # rename. If the durable write cannot be guaranteed, REFUSE the swap —
+    # renaming live data without a recoverable state is forbidden.
+    if ! tpi_write_marker "$marker" "$backup_dir"; then
+        svc_start
+        echo "✗ durable marker write failed — refusing to swap live data" >&2
+        exit 1
+    fi
+    if [ -d "$current" ]; then
+        if ! mv "$current" "$backup_dir"; then
+            svc_start
+            echo "✗ could not move the live data dir aside — refusing the swap" >&2
+            exit 1
+        fi
+    fi
+    if mv "$staged" "$current"; then
+        rm -f "$marker"
+        sync "$(dirname "$marker")" 2>/dev/null || true   # persist the cleanup
+        svc_start
+        trap - EXIT
+        echo "✓ restored into $TRI_PI_DATA_DIR (previous data kept at $(basename "$backup_dir"))"
+    elif mv "$backup_dir" "$current"; then
+        rm -f "$marker"
+        sync "$(dirname "$marker")" 2>/dev/null || true   # persist the cleanup
+        svc_start
+        echo "✗ staged install failed — original data restored, nothing lost" >&2
+        exit 1
+    else
+        # BOTH renames failed: honest degraded state — do NOT claim the live
+        # data is fine. Retain the durable marker so boot-time recovery can
+        # still complete (tpi_restore_recover handles current-missing state).
+        svc_start
+        echo "✗ CRITICAL: staged install AND rollback both failed." >&2
+        echo "  The data dir is currently ABSENT — the wallet is NOT in place." >&2
+        echo "  Recovery metadata retained at: $marker" >&2
+        echo "  Backup data retained at:       $backup_dir" >&2
+        echo "  Re-run any tri7-appliance command to auto-recover from the backup." >&2
+        exit 1
+    fi
+}
+
+do_upgrade() {
+    local SRC="${1:?usage: tri7-appliance upgrade <new-bundle-dir>}"
+    systemctl stop "$SERVICE"
+    restore_svc() { systemctl start "$SERVICE" || true; }
+    trap restore_svc EXIT
+    install -m 755 "$SRC/bin/tri7d" /usr/local/bin/tri7d
+    install -m 755 "$SRC/bin/tri7" /usr/local/bin/tri7
+    install -m 755 "$SRC/bin/store_gapfix" /usr/local/bin/store_gapfix
+    systemctl start "$SERVICE"
+    trap - EXIT
+    echo "✓ upgraded from $SRC"
+}
+
+# When sourced (tests), define the functions and return — do not dispatch CLI.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0 2>/dev/null || true
+fi
+
+# CLI startup: complete any interrupted restore BEFORE anything else touches
+# the data dir (this is what makes "re-run any tri7-appliance command" true).
+tpi_restore_recover
+
+case "${1:-status}" in
+status)    status ;;
+backup)    do_backup ;;
+restore)   [ -z "${2:-}" ] && { echo "usage: tri7-appliance restore <backup.tar.gz>"; exit 1; }
+           do_restore "$2" ;;
+upgrade)   [ -z "${2:-}" ] && { echo "usage: tri7-appliance upgrade <new-bundle-dir>"; exit 1; }
+           do_upgrade "$2" ;;
+validate)  [ -z "${2:-}" ] && { echo "usage: tri7-appliance validate <backup.tar.gz>"; exit 1; }
+           tpi_validate_archive "$2" && echo "✓ archive safe" ;;
+*)         grep -E "^#   tri7-appliance" "$0" | sed 's/^#   //' ;;
+esac

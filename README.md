@@ -1,18 +1,37 @@
-# TRI-PI — Triangles TRI7 Node for ARM64 (tri7d)
+# TRI-PI — Triangles TRI7 Wallet Appliance for ARM64 (tri7d)
 
 [![Latest Release](https://img.shields.io/github/v/release/SamiAhmed7777/tri-pi?label=Latest%20Release)](https://github.com/SamiAhmed7777/tri-pi/releases/latest)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/SamiAhmed7777/tri-pi/build-arm64.yml?label=ARM64%20Build)](https://github.com/SamiAhmed7777/tri-pi/actions)
 [![Platform](https://img.shields.io/badge/platform-ARM64-blue)](https://github.com/SamiAhmed7777/tri-pi)
+
+**TRI-PI is a fully functioning Triangles WALLET on a plug-in box** (2026-11-14):
+the installer provisions the node AND creates a 24-word wallet, the daemon runs
+with `--wallet` (balance, receive, send, staking-by-default), the `tri7` wallet
+CLI manages keys, and `tri7-appliance` is the one-command manager
+(status / backup / restore / upgrade). P2P is loopback-backed and firewalled —
+**Triangles is never on public clearnet**; the tor onion network carries the
+traffic.
 
 Run a **tri7d** node — the modern Rust full-node client from
 [tri7](https://github.com/SamiAhmed7777/tri7) — on Raspberry Pi 4/5 or any
 ARM64 server. Includes Tor integration, systemd service, and optional
 blockchain bootstrap.
 
-> **TRI7 era (v7.0.0-tri7.1):** TRI-PI now ships **tri7d** (`follow_tip`), the
-> pure-Rust client that replays the legacy chain byte-for-byte. The legacy C++
-> `trianglesd` is retired; its ARM64 binary is kept under `legacy/` for
-> rollback only.
+> **TRI7 era (v7.0.3-tri7.2):** TRI-PI now ships **tri7d** (`follow_tip`), the
+> pure-Rust client that replays the legacy chain byte-for-byte — plus the
+> wallet appliance layer (wallet CLI, `--wallet` daemon, appliance manager,
+> no-clearnet firewall policy). The legacy C++ `trianglesd` is retired; its
+> ARM64 binary is kept under `legacy/` for rollback only.
+
+## Wallet appliance quick start
+
+```bash
+sudo ./install.sh        # node + 24-word wallet + staking + firewall, one command
+tri7-appliance status    # balance, staking, last reward, peers, wallet
+tri7-appliance backup    # wallet + chain snapshot (KEEP PRIVATE)
+```
+
+The 24 words printed at install are the ONLY backup — write them on paper.
 
 ## TRI7-era facts
 

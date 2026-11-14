@@ -46,9 +46,10 @@ fi
 echo "=== Test: install.sh systemctl enable ==="
 grep -q "systemctl.*enable" install.sh 2>/dev/null && pass "systemctl enable present" || fail "systemctl enable missing"
 
-# Test 8: install.sh has bootstrap URL
+# Test 8: install.sh bootstrap URL (env-driven: TRI_PI_BOOTSTRAP_URL; the
+# canonical archive lives on DNS2 and is intentionally not hardcoded here)
 echo "=== Test: install.sh bootstrap URL ==="
-grep -q "triangles-bootstrap\|bootstrap\.cryptographic-triangles" install.sh 2>/dev/null && pass "Bootstrap URL present" || fail "Bootstrap URL missing"
+grep -q "TRI_PI_BOOTSTRAP_URL" install.sh 2>/dev/null && pass "Bootstrap URL support present (env-driven)" || fail "Bootstrap URL missing"
 
 # Test 9: bootstrap.sh has download
 echo "=== Test: bootstrap.sh download ==="
@@ -74,6 +75,58 @@ fi
 echo "=== Test: root check ==="
 grep -qE "root|id.*-u.*0" install.sh 2>/dev/null && pass "Root check present" || fail "Root check missing"
 
+# ─── 2026-11-14 wallet-appliance additions ───────────────────────────────
+
 echo ""
-echo "Results: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+echo "=== Test: wallet creation step present ==="
+grep -q "wallet create-seed" install.sh 2>/dev/null && pass "wallet creation step present" || fail "wallet creation step missing"
+
+echo ""
+echo "=== Test: wallet CLI installed by installer ==="
+grep -q "bin/tri7" install.sh 2>/dev/null && pass "wallet CLI install present" || fail "wallet CLI install missing"
+
+echo ""
+echo "=== Test: systemd unit runs with --wallet ==="
+grep -q -- "--wallet" lib/common.sh 2>/dev/null && pass "daemon runs with --wallet" || fail "no --wallet in unit"
+
+echo ""
+echo "=== Test: P2P listener is loopback-only (no clearnet) ==="
+grep -q -- "--listen-bind 127.0.0.1" lib/common.sh 2>/dev/null && pass "listen-bind 127.0.0.1" || fail "listener not loopback-only"
+
+echo ""
+echo "=== Test: no-public-clearnet nft policy in installer ==="
+grep -q "tri7-p2p-policy" install.sh 2>/dev/null && pass "nft policy present" || fail "nft policy missing"
+
+echo ""
+echo "=== Test: no clearnet direct seed default ==="
+if grep -q 'TRI_PI_SEED_DIRECT:=100\.' lib/common.sh 2>/dev/null; then
+    fail "clearnet direct seed still defaulted"
+else
+    pass "no clearnet direct seed default"
+fi
+
+echo ""
+echo "=== Test: bin/tri7d is ARM64 ==="
+if [ -f bin/tri7d ] && file bin/tri7d 2>/dev/null | grep -q "aarch64\|ARM aarch64"; then
+    pass "bin/tri7d is ARM64"
+else
+    fail "bin/tri7d missing or not ARM64"
+fi
+
+echo ""
+echo "=== Test: bin/tri7 wallet CLI present ==="
+[ -f bin/tri7 ] && pass "bin/tri7 present" || fail "bin/tri7 missing"
+
+echo ""
+echo "=== Test: tri7-appliance manager present ==="
+[ -f tri7-appliance ] && bash -n tri7-appliance 2>/dev/null && pass "tri7-appliance present + syntax OK" || fail "tri7-appliance missing/broken"
+
+# ─── Final aggregate (must be the LAST thing — every test above feeds it) ──
+echo ""
+echo "====================================="
+echo "  Results: $PASS passed, $FAIL failed"
+echo "====================================="
+if [ "$FAIL" -ne 0 ]; then
+    exit 1
+fi
+exit 0
